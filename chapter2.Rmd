@@ -1,0 +1,159 @@
+---
+title: Chapter 2 Practice
+output: html_document
+---
+
+**2E1.** _The probability of rain on Monday_ corresponds to (2) Pr(rain|Monday) and (5) Pr(rain, Monday) / Pr(Monday)
+
+**2E2.** Pr(Monday|rain) corresponds to (3) The probability that it is Monday, given that it is raining.
+
+**2E3.** _The probability that it is Monday given that it is raining_ corresponds to (1) Pr(Monday|rain) and (4) Pr(rain|Monday) Pr(Monday) / Pr(rain)
+
+**2E4.** Saying "the probability of water is 0.7" means that we have assigned the plausibility of 0.7 to our uncertainty about the outcome of tossing the globe and our right index finger landing on water.
+
+**2M1.** 
+
+```{r}
+p_grid <- seq(from = 0, to = 1, length.out = 1000)
+prior <- rep(1, length(p_grid))
+
+par(mfrow = c(1, 3))
+# (1) Data is W, W, W
+l <- dbinom(3, size = 3, prob = p_grid)
+posterior <- l * prior / sum(l * prior)
+plot(p_grid, posterior, type = "l", col = "blue", main = "Data is W W W")
+
+# (2) Data is W, W, W, L
+l <- dbinom(3, size = 4, prob = p_grid)
+posterior <- l * prior / sum(l * prior)
+plot(p_grid, posterior, type = "l", col = "blue", main = "Data is W W W L")
+
+# (3) Data is L, W, W, L, W, W, W
+l <- dbinom(5, size = 7, prob = p_grid)
+posterior <- l * prior / sum(l * prior)
+plot(p_grid, posterior, type = "l", col = "blue",
+    main = "Data is L W W L W W W")
+```
+
+**2M2.** 
+```{r}
+p_grid <- seq(from = 0, to = 1, length.out = 1000)
+prior <- c(rep(0, length(p_grid) / 2), rep(1, length(p_grid) / 2))
+
+par(mfrow = c(1, 3))
+# (1) Data is W, W, W
+l <- dbinom(3, size = 3, prob = p_grid)
+posterior <- l * prior / sum(l * prior)
+plot(p_grid, posterior, type = "l", col = "blue", main = "Data is W W W")
+
+# (2) Data is W, W, W, L
+l <- dbinom(3, size = 4, prob = p_grid)
+posterior <- l * prior / sum(l * prior)
+plot(p_grid, posterior, type = "l", col = "blue", main = "Data is W W W L")
+
+# (3) Data is L, W, W, L, W, W, W
+l <- dbinom(5, size = 7, prob = p_grid)
+posterior <- l * prior / sum(l * prior)
+plot(p_grid, posterior, type = "l", col = "blue",
+    main = "Data is L W W L W W W")
+```
+
+**2M3.** I interpret the information given in the following way:
+
+- "The Earth globe is 70% covered in water" as Pr(water|Earth) = 0.7, which, assuming only land and water are possible implies that Pr(land|Earth) = 0.3
+- "The Mars globe is 100% lang" as Pr(land|Mars) = 1
+- "Assume each globe was equally likely to be tossed" as Pr(Earth) = Pr(Mars) = 0.5
+
+Pr(Earth|land) = Pr(land|Earth) x Pr(Earth) / (Pr(land|Earth) x Pr(Earth) + Pr(land|Mars) x Pr(Mars))
+= 0.3 x 0.5 / (0.3 x 0.5 + 1 x 0.5) = 0.15 / 0.65 = `r 0.15 / 0.65`
+
+**2M4.** With the three cards, there are 6 ways to draw a card from the bag and place one of its sides face up on the table, namely one way for each side (3 cards x 2 sides each). These possibilities are shown in the table below.
+
+ Card | Side Up | Side Down 
+------|--------|----------
+B/B|B|B
+B/B|B|B 
+B/W|B|W 
+B/W|W|B 
+W/W|W|W 
+W/W|W|W 
+
+The first 3 are consistent with the data. Among these three, there are 2 ways for the side facing down to be black. So, the Pr(B/B | B) = 2/3.
+
+**2M5.** If there are 4 cards (an additional B/B added to the set in 2M4), then there are 8 ways to draw a card from the bag and place it on the table with one side facing up. 
+
+Card | Side Up | Side Down 
+------|--------|----------
+B/B|B|B
+B/B|B|B 
+B/W|B|W 
+B/W|W|B 
+W/W|W|W 
+W/W|W|W 
+B/B|B|B 
+B/B|B|B 
+
+The first three possibilities and the final two are consistent with the data. Of these 5, 4 have black as the other side. So, the probability of the other side being black given the face-up side is black is 4/5.
+
+**2M6.** Using the table from 2M4., there are three possibilities that are consistent with the data (drawing a card with a black side face up). But, with the new information about the weight of black ink the third possibility (B/W) is twice as likely as the other two. This means that there are four total possibilities with only two of them having black on the other side of the card. Thus, the probability of black on the other side given black face up is 1/2.
+
+**2M7.** If the first card is B/B, then there are four ways the second card can be drawn:
+
+Card #2|Side Up|Side down
+-------|-------|---------
+B/W|B|W
+B/W|W|B 
+W/W|W|W 
+W/W|W|W 
+
+If the first card is B/W, then are four other ways that the second card can be drawn:
+
+Card #2|Side Up|Side down
+-------|-------|---------
+B/B|B|B
+B/B|B|B 
+W/W|W|W 
+W/W|W|W 
+
+For each of the two ways to draw B/B on the first card, there are 3 ways to get a W face up on the second card. For the one way to draw the B/W card, there are two ways to get a W face up on the second card. Therefore, there are 8 possible combinations consistent with black face up on the first card and white face up on the second card. Of these eight, there are six ways for the first card to have black face down (count the three possibilities from the first table for each of the two ways to draw the B/B card first). Therefore, the probability of black is 6/8=0.75.
+
+**2H1.** The information given is 
+
+1. Pr(twins|A) = 0.1
+2. Pr(twins|B) = 0.2
+3. Pr(A) = Pr(B) = 0.5
+
+We want to find Pr(Birth 2 = twins|Birth 1 = twins). We do this by splitting up the probability across the two species.
+
+Pr(Birth 2 = twins|Birth 1 = twins) = Pr(Birth 2 = twins|Birth 1 = twins, A) Pr(A|Birth 1 = twins) + Pr(Birth 2 = twins|Birth 1 = twins, B) Pr(B| Birth 1 = twins)
+
+Based on the question, whether a birth is twins or singleton does not influence the outcome of the subsequent birth _within a species_. So, Pr(Birth 2 = twins|Birth 1 = twins, A) = Pr(Birth 2 = twins|A) = Pr(twins|A) = 0.1. By a similar argument, Pr(Birth 2 = twins|Birth 1 = twins, B) = 0.2. 
+
+Next, we use Bayes' Theorem to get Pr(A|Birth 1 = twins):
+
+Pr(A|Birth 1 = twins) = Pr(Birth 1 = twins|A) Pr(A) / (Pr(Birth 1 = twins|A)Pr(A) + Pr(Birth1 = twins|B)Pr(B)) = 0.1 x 0.5 / (0.1 x 0.5 + 0.2 x 0.5) = `r (0.1 * 0.5) / (0.1 * 0.5 + 0.2 * 0.5)`. 
+
+A similar argument gives Pr(B|Birth 1 = twins) = Pr(Birth 1 = twins|B) Pr(B) / (Pr(Birth 1 = twins|A)Pr(A) + Pr(Birth1 = twins|B)Pr(B)) = 0.1 x 0.5 / (0.1 x 0.5 + 0.2 x 0.5) = `r (0.2 * 0.5) / (0.1 * 0.5 + 0.2 * 0.5)`.
+
+Now, we go back an use all these values:
+
+Pr(Birth 2 = twins|Birth 1 = twins) = 0.1 x (0.333333) + 0.2 x (0.666667) = `r 0.1 * (1/3) + 0.2 * (2/3)`.
+
+**2H2.** The Pr(A | twins) was determined in **2H1** as `r (0.1 * 0.5) / (0.1 * 0.5 + 0.2 * 0.5)`.
+
+**2H3.** Pr(A|twins, single) = Pr(twins, single|A) Pr(A) / (Pr(twins, single|A)Pr(A) + Pr(twins, single|B)Pr(B)) = (0.1 x 0.9 x 0.5) / (0.1 x 0.9 x 0.5 + 0.2 x 0.8 x 0.5) = `r (0.1 * 0.9 * 0.5) / (0.1 * 0.9 * 0.5 + 0.2 * 0.8 * 0.5)`.
+
+**2H4.** The information about the test's accuracy can be written:
+
+- Pr(test=A|A) = 0.8, which implies Pr(test=B|A) = 0.2
+- Pr(test=B|B) = 0.65, which implies Pr(test=A|B) = 0.35
+
+The first part of the question asks just for
+
+Pr(A|test=A) = Pr(test=A|A) * Pr(A) / (Pr(test=A|A) x Pr(A) + Pr(test = B|A) x Pr(B)) = (0.8 x 0.5) / (0.8 x 0.5 + 0.35 x 0.5) = `r (0.8 * 0.5) / (0.8 * 0.5 + 0.35 * 0.5)`.
+
+Now, we have two more sets of information from previous question. (1) The panda births twins, (2) the panda births twins and then a singleton. We apply Bayes' theorem to determine the posterior probability of the panda's species being A given that the test indicated species and the two sets of birthing data. We first note that we will use the fact that knowing the species all the other information is independent (test results, twins or singleton birth), so adding these to the conditioning information along with the species provides no additional information.
+
+Pr(A|test=A,twins) = Pr(test=A|A,twins) x Pr(A|twins) / (Pr(test=A|A,twins) x Pr(A|twins) + Pr(test=A|B,twins) x Pr(B|twins)) = (0.8 x (1/3)) / (0.8 x (1/3) + 0.35 x (2/3)) = `r (0.8 * (1/3) / (0.8 * (1/3) + 0.35 * (2/3)))`.
+
+Pr(A|test=A,twins,singleton) = Pr(test=A|A,twins,singleton) x Pr(A|twins,singleton) / (Pr(test=A|A,twins,singleton) x Pr(A|twins,singleton) + Pr(test=A|B,twins,singleton) x Pr(B|twins,singleton))) = (0.8 x 0.36) / (0.8 x 0.36 + 0.35 x 0.64) = `r (0.8 * 0.36 / (0.8 * 0.36 + 0.35 * 0.64))`.
