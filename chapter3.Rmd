@@ -1,0 +1,192 @@
+---
+title: Chapter 3 Problems
+output: html_document
+---
+
+```{r globe-tossing}
+p_grid <- seq(from = 0, to = 1, length.out = 1000)
+prior <- rep(1, 1000)
+likelihood <- dbinom(6, size = 9, prob = p_grid)
+posterior <- likelihood * prior
+posterior <- posterior / sum(posterior)
+
+set.seed(100)
+samples <- sample(p_grid, prob = posterior, size = 1e4, replace = TRUE)
+```
+
+**3E1.**
+```{r}
+sum(samples < 0.2) / length(samples)
+```
+**3E2.**
+```{r}
+sum(samples > 0.8) / length(samples)
+```
+**3E3.**
+```{r}
+sum(samples >= 0.2 & samples <= 0.8) / length(samples)
+```
+**3E4.**
+```{r}
+quantile(samples, 0.2)
+```
+**3E5.**
+```{r}
+quantile(samples, 0.8)
+```
+**3E6.**
+```{r, message=FALSE, warning=FALSE}
+library(rethinking)
+HPDI(samples, prob = 0.66)
+```
+**3E7.**
+```{r}
+PI(samples, prob = 0.66)
+```
+**3M1.**
+```{r}
+likelihood <- dbinom(8, size = 15, prob = p_grid)
+posterior <- likelihood * prior
+posterior <- posterior / sum(posterior)
+```
+**3M2.**
+```{r}
+samples <- sample(p_grid, prob = posterior, size = 1e4, replace = TRUE)
+HPDI(samples, prob = 0.9)
+
+dens(samples)
+```
+**3M3.**
+```{r}
+posterior_predictive <- rbinom(1e4, size = 15, prob = samples)
+(prob_8_in_15 <- sum(posterior_predictive == 8) / length(posterior_predictive))
+```
+**3M4.**
+```{r}
+post_pred <- rbinom(1e4, size = 9, prob = samples)
+(prob_6_in_9 <- sum(post_pred == 6) / length(post_pred))
+```
+**3M5.**
+```{r}
+# Set a new prior
+prior <- c(rep(0, length(p_grid) / 2), rep(2, length(p_grid) / 2))
+# Re-calculate the new posterior
+posterior <- likelihood * prior
+posterior <- posterior / sum(posterior)
+
+# Sample from the posterior
+samples <- sample(p_grid, size = 1e4, prob = posterior, replace = TRUE)
+HPDI(samples, prob = 0.9)
+
+# Posterior probability of 8 waters in 15 tosses
+post_pred_15 <- rbinom(1e4, size = 15, prob = samples)
+(prob_8_in_15 <- sum(post_pred_15 == 8) / length(post_pred_15))
+
+# Posterior probability of 6 waters in 9 tosses
+post_pred_15 <- rbinom(1e4, size = 9, prob = samples)
+(prob_8_in_15 <- sum(post_pred_15 == 6) / length(post_pred_15))
+
+# Plot density
+dens(samples)
+```
+The better prior causes better estimates of the parameter $p$ with the same amount of data (9 tosses of the globe). For example, the 90% HPDI is much narrower with the better prior: 0.21 wide vs. 0.39 wide with the uniform prior. Furthermore, the density is also narrower as can be seen in the above graphs.
+
+**3M6.**
+
+To answer this question, we will calculate widths of the 99% PI for several numbers of tosses ($N$s). To do this, we need to know how many water tosses there were ($W$s). Once we know $W$, we can easily calculate the 99% PI for the data ($N$, $W$) with the given prior. So, for a given $N$, we just loop through each possible $W$ and calculate the width of the 99% PI. Then we loop through each $N$. 
+
+```{r cache=TRUE}
+# For a given set of 
+N <- seq(from = 1, to = 5000, by = 100)
+p_grid <- seq(from = 0, to = 1, length.out = 1e4)
+prior <- rep(1, 1e4)
+pi_width_by_toss <- function(N, p_grid, prior) {
+    # Possible Ws
+    W <- seq(from = 0, to = N)
+    # For a given W, calculate the width 99% PI
+    pi_width <- function(W) {
+        l <- dbinom(W, size = N, prob = p_grid)
+        post <- l * prior
+        post <- post / sum(post)
+        samples <- base::sample(p_grid, size = 1e4, replace = TRUE, prob = post)
+        return(diff(PI(samples, prob = 0.99)))
+    }
+    # Calculate the widths of the 99% PI for each possible W
+    return(sapply(W, pi_width, USE.NAMES = FALSE))
+}
+
+all_widths <- lapply(N, pi_width_by_toss, p_grid, prior)
+all_Ns <- unlist(sapply(N, \(x){rep(x, x + 1)}))
+all_widths_v <- unlist(all_widths)
+plot(all_Ns, all_widths_v)
+abline(h = 0.05, col = "red", lty = 2)
+
+# Calculate the percent of widths < 0.05 per number of tosses
+pct_small_widths <- sapply(all_widths, \(x) {mean(x <= 0.05)})
+plot(N, pct_small_widths, type = "o")
+```
+Based on the chart above. It takes about 3000 tosses before we are guaranteed to have 99% PI whose width is less than 0.05; it takes about 2000 tosses for a 50% chance (depending on the observed data).
+ 
+**3H1.**
+Let $B$ be the number of boys born in $N$ births and $p$ the probability of a birth being a boy. Then, the model we will use is 
+$$
+\begin{align*}
+B &\sim \text{Binomial}(N, p) \\
+p &\sim \text{Uniform}(0,1)
+\end{align*}
+$$
+
+```{r}
+# Load the data
+data(homeworkch3)
+n_births <- length(birth1) + length(birth2)
+n_boys <- sum(birth1) + sum(birth2)
+# Use the same `p_grid` from earlier
+prior <- rep(1, length(p_grid))
+likelihood <- dbinom(n_boys, size = n_births, prob = p_grid)
+posterior <- likelihood * prior
+posterior <- posterior / sum(posterior)
+p_grid[which.max(posterior)]
+```
+
+**3H2.**
+```{r}
+samples <- sample(p_grid, 1e4, replace = TRUE, prob = posterior)
+HPDI(samples, prob = 0.5)
+HPDI(samples, prob = 0.89)
+HPDI(samples, prob = 0.97)
+```
+
+**3H3.**
+```{r}
+post_pred <- rbinom(1e4, size = 200, prob = samples)
+# Distribution of posterior predictions
+dens(post_pred)
+# Number of boys in the sample and the posterior predictive mean plotted as a
+# vertical line
+abline(v = c(n_boys, mean(post_pred)), col = c(rangi2, "red"), lty = 2)
+```
+The actual number of boys in the sample is close to the posterior predictive distribution, but the mean of the distribution is a bit larger.
+
+**3H4.**
+```{r}
+post_pred_100 <- rbinom(1e4, size = 100, prob = samples)
+dens(post_pred_100)
+abline(v = sum(birth1), col = rangi2, lty = 2)
+```
+This model appears to overestimate the number of firstborn boys. 
+
+**3H5.**
+```{r}
+births_after_female_1st_borns <- birth2[birth1 == 0]
+post_pred_after_female <- rbinom(1e4,
+                                 size = length(births_after_female_1st_borns),
+                                 prob = samples)
+dens(post_pred_after_female)
+abline(v = sum(births_after_female_1st_borns), col = rangi2, lty = 2)
+```
+
+
+
+
+
