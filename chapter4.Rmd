@@ -5,7 +5,7 @@ output: html_document
 
 ## Notes
 
-### Example linear regression (p. 97-110)
+### Example normal model of height (sec. 4.3)
 ```{r}
 library(tidyverse)
 library(rethinking)
@@ -13,6 +13,30 @@ library(rethinking)
 # Load data from rethinking package and limit to adults
 data(Howell1)
 d2 <- Howell1[Howell1$age >= 18, ]
+
+# Height model
+mu_list <- seq(from = 150, to = 160, length.out = 100)
+sigma_list <- seq(from = 7, to = 9, length.out = 100)
+post <- expand.grid(mu = mu_list, sigma = sigma_list)
+post$LL <- sapply(1:nrow(post), 
+                  function(i) 
+                    sum(dnorm(d2$height, post$mu[[i]], post$sigma[[i]], log = TRUE)))
+post$prod <- post$LL +
+  dnorm(post$mu, 178, 20, log = TRUE) +
+  dunif(post$sigma, 0, 50, log = TRUE)
+post$prob <- exp(post$prod - max(post$prod))
+
+# Sample from posterior
+sample_rows <- sample(1:nrow(post) - 1, size = 1e4, replace = TRUE, prob = post$prob)
+sample_mu_sigma <- post[sample_rows, c("mu", "sigma")]
+plot(sample_mu_sigma, cex = 0.5, pch = 16, col = col.alpha(rangi2, 0.1))
+
+```
+
+### Example linear regression (p. 97-110)
+```{r}
+# Scatter plot of height and weight
+plot(d2$height, d2$weight)
 
 # Define mean of weight for centering
 xbar <- mean(d2$weight)
