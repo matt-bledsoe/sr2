@@ -3,15 +3,19 @@ title: Chapter 4 Problems and Notes
 output: html_document
 ---
 
-## Notes
-
-### Example normal model of height (sec. 4.3)
-```{r}
+```{r setup}
 library(tidyverse)
 library(rethinking)
 
-# Load data from rethinking package and limit to adults
+# Load Howell !Kung data from rethinking package
 data(Howell1)
+```
+
+## Notes
+
+### Example normal model of height (sec. 4.3)
+```{r example_4.3}
+# Limit Howell data to adults
 d2 <- Howell1[Howell1$age >= 18, ]
 
 # Height model
@@ -34,7 +38,7 @@ plot(sample_mu_sigma, cex = 0.5, pch = 16, col = col.alpha(rangi2, 0.1))
 ```
 
 ### Example linear regression (p. 97-110)
-```{r}
+```{r example_4.4}
 # Scatter plot of height and weight
 plot(d2$height, d2$weight)
 
@@ -61,11 +65,12 @@ post <- extract.samples(m4.3)
 a_map <- mean(post$a)
 b_map <- mean(post$b)
 ggplot(data = d2, aes(x = weight, y = height)) +
-  geom_point(color = "red", shape = "o", size = 4) +
-  geom_abline(slope = b_map, intercept = a_map - b_map * xbar, lwd = 2) +
+  geom_point(color = rangi2, shape = "o", size = 4) +
+  geom_abline(slope = b_map, intercept = a_map - b_map * xbar, lwd = 1) +
   geom_abline(data = post[1:20, ],
               aes(slope = b, intercept = a - b * xbar),
-              alpha = 0.4)
+              alpha = 0.3) +
+  theme_minimal()
 
 # Distribution of mu at weight values
 weight_seq <- 25:70
@@ -89,13 +94,13 @@ height_pi <- apply(sim_height, 2, PI, prob = 0.89) %>%
 ggplot() +
   geom_point(data = d2,
              aes(x = weight, y = height),
-             color = "red",
+             color = rangi2,
              shape = "o",
              size = 4) +
   geom_abline(slope = b_map, intercept = a_map - b_map * xbar) +
   geom_ribbon(data = mu_pi, aes(x = weight, ymin = `mu_5%`, ymax = `mu_94%`),
-              alpha = 0.3,
-              fill = rangi2) +
+              alpha = 0.4,
+              fill = "gray") +
   geom_ribbon(data = height_pi,
               aes(x = weight, ymin = `height_5%`, ymax = `height_94%`),
               alpha = 0.3) +
@@ -120,7 +125,7 @@ $$
 **4E5.** There are three parameters in the posterior distribution: $\alpha$, $\beta$, and $\sigma$.
 
 **4M1.** 
-```{r}
+```{r p4m1}
 prior_mu <- rnorm(1e4, mean = 0, sd = 10)
 prior_s <- rexp(1e4, rate = 1)
 y_prior_pred <- rnorm(1e4, mean = prior_mu, s = prior_s)
@@ -128,7 +133,7 @@ hist(y_prior_pred)
 ```
 
 **4M2.**
-```{r eval=FALSE}
+```{r p4m2, eval=FALSE}
 quap(
     alist(
         y ~ dnorm(mu, sigma),
