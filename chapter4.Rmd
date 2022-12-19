@@ -146,7 +146,7 @@ quap(
 **4M3.**
 $$
 \begin{align*}
-y_i &\sim \text{Normal}(\mu, \sigma) \\
+y_i &\sim \text{Normal}(\mu_i, \sigma) \\
 \mu_i &= \alpha + \beta x_i \\
 \alpha &\sim \text{Normal}(0, 10) \\
 \beta &\sim \text{Uniform}(0, 1) \\
@@ -155,3 +155,184 @@ y_i &\sim \text{Normal}(\mu, \sigma) \\
 $$
 
 **4M4.**
+
+A model for this problem could be:
+
+$$
+\begin{align*}
+y_i &\sim \text{Normal}(\mu_i, \sigma) \\
+\mu_i &= \alpha + \beta x_i \\
+\alpha &\sim \text{Normal}(168, 20) \\
+\beta &\sim \text{Exponential}(0.5) \\
+\sigma &\sim \text{Exponential}(1)
+\end{align*}
+$$
+where $x_i$ is the year of the study (1, 2, or 3) minus 1. 
+
+* $\alpha$ is the average height in the first year of the study. It's prior has an average of roughly 5'5" and a standard deviation of 20 cm. 
+* Since we are dealing with students, we may assume that they don't shrink during the study. So, I chose the Exponential distribution with a mean of 2 cm.
+* The variance parameter was chosen as recommended in the chapter.
+
+**4M5.**
+
+No, this doesn't change my priors or model as the fact that students get taller is guaranteed by my prior for $\beta$ already.
+
+**4M6.**
+
+Knowing that the variance of heights among students of the same age was never more than 64 cm would make me change my prior on $\sigma$ to $\text{Uniform}(0,64)$. This would allow for the variance to be positive while encoding the upper-bound to be no more than 64.
+
+**4M7.**
+```{r p4m7}
+# Fit model 4.3 without centered weights
+d2 <- Howell1[Howell1$age >= 18, ]
+m4.3_alt <- quap(
+  alist(
+    height ~ dnorm(mu, sigma),
+    mu <- a + b * weight,
+    a ~ dnorm(178, 20),
+    b ~ dlnorm(0, 1),
+    sigma ~ dunif(0, 50)
+  ),
+  data = d2
+)
+
+# Summary of posterior
+precis(m4.3_alt)
+vcov(m4.3_alt)
+
+# Sample from the posterior
+post_alt <- extract.samples(m4.3_alt)
+# Mean of posterior a and b parameters
+a_map <- mean(post_alt$a)
+b_map <- mean(post_alt$b)
+ggplot(data = d2, aes(x = weight, y = height)) +
+  geom_point(color = rangi2, shape = "o", size = 4) +
+  geom_abline(slope = b_map, intercept = a_map - b_map, lwd = 1) +
+  geom_abline(data = post_alt[1:20, ],
+              aes(slope = b, intercept = a - b),
+              alpha = 0.3) +
+  theme_minimal()
+
+# Distribution of mu at weight values
+weight_seq <- 25:70
+mu <- link(m4.3_alt, data = data.frame(weight = weight_seq))
+mu_mean <- apply(mu, 2, mean)
+mu_pi <- apply(mu, 2, PI, prob = 0.89)
+# Reshape `mu_pi` for easier plotting
+mu_pi <- t(mu_pi) %>%
+  as_tibble() %>%
+  rename_with(~{paste("mu", .x, sep = "_")}) %>%
+  mutate(weight = weight_seq)
+# Generate posterior predictions
+sim_height <- sim(m4.3_alt, data = list(weight = weight_seq), n = 1e4)
+height_pi <- apply(sim_height, 2, PI, prob = 0.89) %>%
+  t() %>%
+  as_tibble() %>%
+  rename_with(~{paste("height", .x, sep = "_")}) %>%
+  mutate(weight = weight_seq)
+
+
+ggplot() +
+  geom_point(data = d2,
+             aes(x = weight, y = height),
+             color = rangi2,
+             shape = "o",
+             size = 4) +
+  geom_abline(slope = b_map, intercept = a_map) +
+  geom_ribbon(data = mu_pi, aes(x = weight, ymin = `mu_5%`, ymax = `mu_94%`),
+              alpha = 0.4,
+              fill = "gray") +
+  geom_ribbon(data = height_pi,
+              aes(x = weight, ymin = `height_5%`, ymax = `height_94%`),
+              alpha = 0.3) +
+  theme_minimal()
+```
+
+Observations:
+
+- The estimates for $\sigma$ don't change; the estimates for $\beta$ are very similar; but, the estimate for $\alpha$ changes: the mean is lower (154.60 to 114.53), but the standard deviation is greater (0.27 vs. 1.90)
+- The parameters now have some covariance, which they didn't have when the weights were centered. However, the covariance is relatively small: the largest (in abs. value) is between $\text{Cov}(\alpha, \beta)$ = `r vcov(m4.3_alt)[1, 2]`.
+- The predictions of the centered and non-centered models are similar.
+
+**4M8.**
+```{r p4m8}
+# Load cherry blossoms data from rethinking
+data("cherry_blossoms")
+# Remove years with missing data
+cb <- cherry_blossoms[complete.cases(cherry_blossoms$doy), ]
+
+# Define function to vary output by number of knots and spread of prior on w
+vary_inputs <- function(num_knots, w_spread = 10) {
+  knot_list <- quantile(cb$year, probs = seq(0, 1, length.out = num_knots))
+  
+  # Define splines
+  B <- splines::bs(cb$year, knots = knot_list[-c(1, num_knots)], degree = 3, 
+                   intercept = TRUE)
+  # Fit the model
+  cb_m1 <- quap(
+    alist(
+      D ~ dnorm(mu, sigma),
+      mu <- a + B %*% w,
+      a ~ dnorm(100, 10),
+      w ~ dnorm(0, w_spread),
+      sigma ~ dexp(1)
+    ),
+    data = list(D = cb$doy, B = B, w_spread = w_spread),
+    start = list(w = rep(0, ncol(B)))
+  )
+  
+  # Extract samples from the posterior and calculate $\mu$ and its 97% interval
+  post <- extract.samples(cb_m1)
+  w <- apply(post$w, 2, mean)
+  mu <- link(cb_m1)
+  mu_PI <- apply(mu, 2, PI, 0.97)
+  
+  # Plots
+  plot_basis <- B |>
+    as_tibble(.name_repair = ~paste0("B", .x)) |>
+    bind_cols("year" = cb$year) |>
+    pivot_longer(cols = -year) |>
+    ggplot() +
+    geom_line(aes(x = year, y = value, group = name)) +
+    scale_y_continuous(breaks = c(0, 1), name = "basis value") +
+    scale_x_continuous(breaks = seq(800, 2000, by = 200)) +
+    geom_text(data = tibble(x = knot_list, y = 1.05, label = "+"),
+              aes(x = x, y = y, label = label),
+              size = 6) + 
+    theme_minimal()
+  
+  plot_wtd_basis <- B %*% diag(w) |>
+    as_tibble() |>
+    bind_cols("year" = cb$year) |>
+    pivot_longer(cols = -year) |>
+    ggplot() +
+    geom_line(aes(x = year, y = value, group = name)) +
+    scale_y_continuous(breaks = c(0), name = "basis * weight") +
+    scale_x_continuous(breaks = seq(800, 2000, by = 200)) +
+    geom_text(data = tibble(x = knot_list, y = 6.05, label = "+"),
+              aes(x = x, y = y, label = label),
+              size = 6) +
+    theme_minimal()
+  
+  mu_pi <- t(mu_PI) |>
+    as_tibble() |>
+    bind_cols("year" = cb$year)
+  plot_mu <- ggplot() +
+    geom_point(data = cb,
+               aes(x = year, y = doy),
+               color = rangi2,
+               alpha = 0.8,
+               pch = 16) +
+    geom_ribbon(data = mu_pi,
+                aes(x = year, ymin = `2%`, ymax = `98%`),
+                alpha = 0.5) +
+    scale_x_continuous(breaks = seq(800, 2000, by = 200),
+                       name = "year") +
+    labs(y = "Day in year") +
+    theme_minimal()
+  
+  return(gridExtra::grid.arrange(plot_basis, plot_wtd_basis, plot_mu, nrow = 3))
+}
+vary_inputs(40, 25)
+```
+
