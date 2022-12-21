@@ -6,6 +6,7 @@ output: html_document
 ```{r setup}
 library(tidyverse)
 library(rethinking)
+library(gt)
 
 # Load Howell !Kung data from rethinking package
 data(Howell1)
@@ -336,3 +337,104 @@ vary_inputs <- function(num_knots, w_spread = 10) {
 vary_inputs(40, 25)
 ```
 
+**4H1.**
+```{r p4h1}
+# Define the new weights
+new_weight <- c(46.95, 43.72, 64.78, 32.59, 54.63)
+# Simulate posterior predictions for new weights
+new_height <- sim(m4.3, data = list(weight = new_weight))
+new_height_pi <- apply(new_height, 2, PI, prob = 0.89)
+new_height_pi |>
+  as_tibble(.name_repair = "unique") |>
+  summarize(across(everything(),
+            list(mean = mean, lower = min, upper = max))) |>
+  pivot_longer(everything()) |>
+  separate(name, into = c("var", "measure"), sep = "_") |>
+  pivot_wider(id_cols = var, names_from = measure) |>
+  mutate(weight = new_weight) |>
+  select(individual = var, weight, mean, lower, upper) |>
+  gt(rowname_col = "individual") |>
+    tab_stubhead(label = "Individual") |>
+    cols_label(
+      weight = "weight",
+      mean = "expected height",
+      lower = "lower bound",
+      upper = "upper bound"
+    ) |>
+  tab_spanner(
+    label = "89% interval",
+    columns = c(lower, upper)
+  )
+```
+
+**4H2.**
+
+(a) Fitting a linear regression to the Howell data with ages below 18
+```{r p4h2a}
+d3 <- Howell1[Howell1$age < 18, ]
+# Scatter plot of height and weight
+plot(d3$weight, d3$height)
+
+# Define mean of weight for centering
+xbar <- mean(d3$weight)
+
+m_l_u18 <- quap(
+    alist(
+        height ~ dnorm(mu, sigma),
+        mu <- a + b * (weight - xbar),
+        a ~ dnorm(120, 20),
+        b ~ dlnorm(0, 1),
+        sigma ~ dunif(0, 50)
+    ),
+    data = d3
+)
+
+# Summary of posterior
+precis(m_l_u18)
+```
+The model predicts that for every 10 units of increase in weight, the child will be about 27cm taller.
+
+(b) Plotting the raw data and model summaries
+
+```{r ph2b}
+# Sample from the posterior
+post <- extract.samples(m4.3)
+# Mean of posterior a and b parameters
+a_map <- mean(post$a)
+b_map <- mean(post$b)
+# Distribution of mu at weight values
+weight_seq <- d3$weight
+mu <- link(m_l_u18, data = data.frame(weight = weight_seq))
+mu_mean <- apply(mu, 2, mean)
+mu_pi <- apply(mu, 2, PI, prob = 0.89)
+# Reshape `mu_pi` for easier plotting
+mu_pi <- t(mu_pi) %>%
+  as_tibble() %>%
+  rename_with(~{paste("mu", .x, sep = "_")}) %>%
+  mutate(weight = weight_seq)
+# Generate posterior predictions
+sim_height <- sim(m_l_u18, data = list(weight = weight_seq), n = 1e4)
+height_pi <- apply(sim_height, 2, PI, prob = 0.89) %>%
+  t() %>%
+  as_tibble() %>%
+  rename_with(~{paste("height", .x, sep = "_")}) %>%
+  mutate(weight = weight_seq)
+
+
+ggplot() +
+  geom_point(data = d3,
+             aes(x = weight, y = height),
+             color = rangi2,
+             shape = "o",
+             size = 4) +
+  geom_abline(slope = b_map, intercept = a_map - b_map * xbar) +
+  geom_ribbon(data = mu_pi, aes(x = weight, ymin = `mu_5%`, ymax = `mu_94%`),
+              alpha = 0.4,
+              fill = "gray") +
+  geom_ribbon(data = height_pi,
+              aes(x = weight, ymin = `height_5%`, ymax = `height_94%`),
+              alpha = 0.3) +
+  theme_minimal()
+```
+
+(c) The model does not fit very well at the lower and upper ends of the weight values. The reason is that the data appear to be non-linear. One could try a transformation of weight, say the logarithm or a root, so that the relationship with height is closer to linear.
