@@ -398,7 +398,7 @@ The model predicts that for every 10 units of increase in weight, the child will
 
 ```{r ph2b}
 # Sample from the posterior
-post <- extract.samples(m4.3)
+post <- extract.samples(m_l_u18)
 # Mean of posterior a and b parameters
 a_map <- mean(post$a)
 b_map <- mean(post$b)
@@ -438,3 +438,71 @@ ggplot() +
 ```
 
 (c) The model does not fit very well at the lower and upper ends of the weight values. The reason is that the data appear to be non-linear. One could try a transformation of weight, say the logarithm or a root, so that the relationship with height is closer to linear.
+
+**4H3.**
+
+(a) Log-linear model for height as a function of weight with all the Howell data
+```{r p4h3a}
+m_howell <- quap(
+    alist(
+        height ~ dnorm(mu, sigma),
+        mu <- a + b * log(weight),
+        a ~ dnorm(100, 20),
+        b ~ dlnorm(0, 1),
+        sigma ~ dunif(0, 50)
+    ),
+    data = Howell1
+)
+
+# Summary of posterior
+precis(m_howell)
+
+# Sample from the posterior
+post <- extract.samples(m_howell)
+# Mean of posterior a and b parameters
+a_map <- mean(post$a)
+b_map <- mean(post$b)
+# Distribution of mu at weight values
+weight_seq <- Howell1$weight
+mu <- link(m_howell, data = data.frame(weight = weight_seq))
+mu_mean <- apply(mu, 2, mean)
+mu_pi <- apply(mu, 2, PI, prob = 0.97)
+# Reshape `mu_pi` for easier plotting
+mu_pi <- t(mu_pi) %>%
+  as_tibble() %>%
+  rename_with(~{paste("mu", .x, sep = "_")}) %>%
+  mutate(weight = weight_seq)
+# Generate posterior predictions
+sim_height <- sim(m_howell, data = list(weight = weight_seq), n = 1e4)
+height_pi <- apply(sim_height, 2, PI, prob = 0.97) %>%
+  t() %>%
+  as_tibble() %>%
+  rename_with(~{paste("height", .x, sep = "_")}) %>%
+  mutate(weight = weight_seq)
+```
+
+The parameter estimates of the model are difficult to interpret due to the `log(weight)` transformation. For $b$ we can say that $p$% increase in weight would cause the model to predict (on average) a $b\log(1+p/100)$ increase in height. This is a bit awkward, but for $a% it's worse. One way to say it would be that it is the average height (predicted by the model) when the weight is 1. But, $a$ is negative, which doesn't make sense. But, as far as I know, there are no post-birth humans that weight one kg. 
+
+(b) Plotting model estimates
+
+```{r p4h3b}
+mean_function <- function(xvar) {
+  a_map + b_map * log(xvar)
+}
+ggplot() +
+  geom_point(data = Howell1,
+             aes(x = weight, y = height),
+             color = rangi2,
+             shape = "o",
+             size = 4) +
+  stat_function(fun = mean_function) +
+  geom_ribbon(data = mu_pi, aes(x = weight, ymin = `mu_2%`, ymax = `mu_98%`),
+              alpha = 0.4,
+              fill = "gray") +
+  geom_ribbon(data = height_pi,
+              aes(x = weight, ymin = `height_2%`, ymax = `height_98%`),
+              alpha = 0.3) +
+  theme_minimal()
+```
+
+**4H4.**
