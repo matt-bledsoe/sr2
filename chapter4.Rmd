@@ -506,3 +506,29 @@ ggplot() +
 ```
 
 **4H4.**
+```{r p4h4}
+# Generate `n` combinations of parameters from the priors
+set.seed(1622)
+n <- 100
+a <- rnorm(n, 150, 50)
+b1 <- rlnorm(n, 0, 1)
+b2 <- rnorm(n, -2, 5)
+
+# Generate plotting data for each of the combinations of the parameters
+weight_s <- (Howell1$weight - mean(Howell1$weight)) / sd(Howell1$weight)
+xs <- seq(from = min(weight_s), to = max(weight_s), length.out = 100)
+plot_data <- tibble(
+  parameter_idx = sort(rep(1:n, n)),
+  x = rep(xs, n),
+  y = a[parameter_idx] + b1[parameter_idx] * x + b2[parameter_idx] * x^2
+)
+
+# Plot prior simulations
+plot_data |>
+  ggplot(aes(x = x, y = y, group = parameter_idx)) +
+  geom_line(alpha = 0.3, color = rangi2) +
+  # guidelines for extremes of human heights
+  geom_hline(yintercept = 0) +
+  geom_hline(yintercept = 272)
+```
+The above parameters generate prior estimates in the normal range. The $\alpha$ parameter's mean seems to shift the cloud of curves up and down, while the sd shrinks or expands the range. The $\beta_1$ parameter seems to set a "steepness" of the curves from left to right, while the $\beta_2$ parameter controls the "curviness".
