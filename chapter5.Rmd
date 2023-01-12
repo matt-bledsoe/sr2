@@ -1,0 +1,103 @@
+---
+title: Chapter 5 Problems and Notes
+output: html_document
+---
+
+```{r setup}
+library(tidyverse)
+library(rethinking)
+
+# Load sample datsets
+data(WaffleDivorce)
+wd <- WaffleDivorce
+data(milk)
+md <- milk
+```
+
+# Notes
+
+* p. 130 - Confirm that all the variables in `WaffleDivorce` are correlated.
+```{r}
+cor(wd[, c("Divorce", "MedianAgeMarriage", "Marriage")])
+```
+
+* p. 149 - Create plot in upper right corner of Figure 5.9
+```{r}
+# Standardize variables of interest and remove NAs
+md_complete <- md |>
+  mutate(mass_log = log(mass),
+         across(c("kcal.per.g", "neocortex.perc", "mass_log"),
+                standardize,
+                .names = "{str_extract(.col, '.')}")) |>
+  drop_na(k, n, m) 
+
+# Replicate model 5.6 (p. 148)
+m5_6 <- quap(
+    alist(
+        k ~ dnorm(mu, sigma),
+        mu <- a + bm * m,
+        a ~ dnorm(0, 0.2),
+        bm ~ dnorm(0, 0.5),
+        sigma ~ dexp(1)
+    ),
+    data = md_complete
+)
+
+xseq <- seq(from = min(md_complete$m) - 0.15, to = max(md_complete$m) + 0.15,
+            length.out = 30)
+mu <- link(m5_6, data = list(m = xseq))
+mu_mean <- apply(mu, 2, mean)
+mu_pi <- apply(mu, 2, PI)
+
+post_data <- tibble(
+    x = xseq,
+    mu = mu_mean
+  ) |>
+  bind_cols(as_tibble(t(mu_pi)))
+
+ggplot(data = post_data) +
+  geom_line(aes(x = x, y = mu)) +
+  geom_ribbon(aes(x = x, ymin = `5%`, ymax = `94%`),
+              color = "gray", alpha = 0.3) +
+  geom_point(data = md_complete, aes(x = m, y = k), color = rangi2,
+             shape = "o", size = 5) +
+  labs(x = "log body mass (std)", y = "kilocal per g (std)") +
+  theme_minimal()
+```
+
+* p. 152 reproduce the plot in the lower right hand corner of Figure 5.9
+```{r}
+# Define model m5.7
+m5_7 <- quap(
+    alist(
+        k ~ dnorm(mu, sigma),
+        mu <- a + bm * m + bn * n,
+        a ~ dnorm(0, 0.2),
+        bm ~ dnorm(0, 0.5),
+        bn ~ dnorm(0, 0.5),
+        sigma ~ dexp(1)
+    ),
+    data = md_complete
+)
+
+# Run counterfactual holding n constant at 0
+mu <- link(m5_7, data = data.frame(m = xseq, n = 0))
+mu_mean <- apply(mu, 2, mean)
+mu_pi <- apply(mu, 2, PI)
+
+plot_data <- tibble(
+    x = xseq,
+    mu = mu_mean
+) |>
+bind_cols(as_tibble(t(mu_pi)))
+
+plot_data |>
+  ggplot(aes(x = x)) +
+  geom_line(aes(y = mu)) +
+  geom_ribbon(aes(ymin = `5%`, ymax = `94%`), color = "gray", alpha = 0.3) +
+  labs(title = "Counterfactual holding N = 0", x = "log body mass (std)",
+       y = "kilocal per g (std)") +
+  theme_minimal()
+```
+
+# Practice
