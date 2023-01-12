@@ -1,0 +1,77 @@
+---
+title: Solutions for Statistical Rethinking 2023 Homework Week 01
+output: html_document
+--- 
+[Link to problem sheet](https://github.com/rmcelreath/stat_rethinking_2023/blob/main/homework/week01.pdf) 
+
+> 1. Suppose the globe tossing data (Lecture 2, Chapter 2) had turned out to be 4 water and 11 land. Construct the posterior distribution.
+```{r p1}
+# Define the possible values of $p$
+prior <- seq(from = 0, to = 1, by = 0.25)
+# Define the data
+data <- c("W" = 4, "L" = 11)
+# Calculate the posterior and then normalize
+post <- sapply(prior, \(p) p^data["W"] * (1 - p)^data["L"])
+(post <- post / sum(post))
+# Plot the posterior
+barplot(post, names.arg = prior)
+```
+
+> 2. Using the posterior distribution from **1**, compute the posterior predictive distribution for the next 5 tosses of the same globe. I recommend you use the sampling method.
+
+```{r p2}
+# Simulate $p$ values from the posterior
+sim_p <- sample(prior, size = 1e4, replace = TRUE, prob = post)
+# Simulate 5 tosses of the globe using probabilities from `sim_p`
+sim_toss <- sapply(sim_p,
+                   \(p) sample(c("W", "L"), size = 5, replace = TRUE,
+                               prob = c(p, 1 - p))
+                  )
+# Plot the distribution for the number of Ws from the simulated tosses
+n_w <- apply(sim_toss, 2, \(toss) sum(toss == "W"))
+barplot(table(n_w) / length(n_w))
+```
+
+> 3. Use the posterior predictive distribution from **2** to calculate the probability of 3 or more water samples in the next 5 tosses.
+
+```{r p3}
+(sum(n_w >= 3) / length(n_w))
+```
+
+> 4. Suppose you observe W = 5 water points, but you forgot to write down how many times the globe was tossed, so you don't know the number of land points $L$. Assume $p = 0.7$ and compute the posterior distribution of the number of tosses $N$.
+
+*This solution seems too complicated, but I think it works.*
+
+We are after
+
+$$\mathbb P(N=n | W=5, p=0.7)$$
+
+By Bayes' Theorem, this is equal to
+
+$$\mathbb P(N=n | W=5, p=0.7) = \frac{\mathbb P(W = 5 | N=n, p=0.7)\mathbb P(N=n, p=0.7)}{\mathbb P(W = 5 | p = 0.7)}$$.
+
+The difficulty is "prior" on $N$: $\mathbb P(N=n|p=0.7)$. But, let's suppose we also know that $N<=M-1$ for some integer $m$. Then we can put a uniform prior on $N$, so that $\mathbb P(N=n|p=0.7)=1/m$ (assuming $N\in\{0,1,\dots,m-1\}$). Then, we get
+
+$$\begin{align}
+\mathbb P(N=n | W=5, p=0.7) &= \frac{\mathbb P(W = 5 | N=n, p=0.7)\mathbb P(N=n, p=0.7)}{\mathbb P(W = 5 | p = 0.7)}\\
+&=\frac{\mathbb P(W = 5 | N=n, p=0.7)\times \frac1m}{\sum_{k=0}^{m-1}\mathbb P(W = 5 | N=k, p=0.7)\times\frac 1m}\\
+&=\frac{\mathbb P(W = 5 | N=n, p=0.7)}{\sum_{k=0}^{m-1}\mathbb P(W = 5 | N=k, p=0.7)}
+\end{align}
+$$
+
+Now we can take the limit as $m\rightarrow\infty$. We can approximate the denominator, and the numerator can be calculated with `dbinom()`.
+
+```{r p4}
+p <- 0.7
+w <- 5
+# Values of N
+ns <- seq(from = 0, to = 1000)
+# Approximate the denominator
+approx_denom <- sum(dbinom(w, ns, p))
+# Posterior distribution for N from 0 to 1000
+post_n <- dbinom(w, ns, p) / approx_denom
+# Plot posterior
+barplot(post_n, names.arg = ns)
+# Zoomed in plot for posterior of N from 1 to 20
+barplot(post_n[1:20], names.arg = ns[1:20])
+```
