@@ -101,3 +101,102 @@ plot_data |>
 ```
 
 # Practice
+
+**5E1.**
+
+The linear models (2) and (4) are multiple linear regressions, because they have more than one predictor and specific coefficients for each. Note the presence or absence of an intercept (the only difference between (2) and (4)) does not determine whether a linear model is a multiple linear regression.
+
+The model (1) is not a multiple linear regression because it only has one predictor, namely $x_i$. Model (2) is not a multiple linear regression because, despite the presence of both $x_i$ and $z_i$, there is only one coefficient. This model is equivalent to a simple linear regression with the single predictor $y_i :=x_i - z_i$.
+
+**5E2.**
+
+Assuming a Gaussian model and appropriate priors on the parameters, the model for the mean in this case could be:
+
+$$\begin{align}
+A_i &\sim \text{Normal }(\mu_i, \sigma)\\
+\mu_i &= \alpha + \beta_L L_i + \beta_P P_i
+\end{align}$$
+
+where $A_i$, $L_i$, and $P_i$ are the animal diversity, latitude, and plant diversity for location $i$, respectively.
+
+**5E3.**
+
+Assuming a Gaussian model and appropriate priors on the parameters, the model for the mean in this case could be:
+
+$$\begin{align}
+T_i &\sim \text{Normal }(\mu_i, \sigma)\\
+\mu_i &= \alpha + \beta_L L_i + \beta_F F_i
+\end{align}$$
+
+where $T_i$, $L_i$, and $F_i$ are the time to PhD, size of laboratory, and amount of funding for student $i$, respectively. One should expect that both $\beta_F$ and $\beta_L$ are positive.
+
+**5E4.**
+
+All models except (2) are inferentially equivalent. They all essentially encode individual means for each category. Model (2) would not even work, I believe, as $\alpha$ could not be estimated: it only is effective when $A_i=B_i=C_i=D_i=0$, which is impossible as I understand the problem.
+
+**5M1.**
+
+Suppose we had data on weekly church attendance rates for a survey of families. In the survey are the rate of weekly church attendance (over a certain period of time) and the number of seats in the family's largest vehicle. I would guess with such data that the larger the number of seats in the vehicle would be positively correlated with weekly church attendance. However, if we also had in the survey data the number of children in the family, then the correlation between number of seats and church attendance would disappear in a model including all three variables.
+
+**5M2.**
+
+Suppose our outcome is the winning percentages of soccer clubs. The two predictors are the size of the club's wage budget and the average goals allowed per game. I would expect that the club's budget is positively correlated with winning percentage (they can afford more world class players) while average goals allowed would be negatively correlated (the more goals allowed per game, the less likely you are to win). The size of the budget and the goals allowed are correlated because a larger budget may indicate the presence of stronger goalkeepers or defenders on the roster that would lower the average goals allowed.
+
+**5M3.**
+
+A high divorce rate could cause a high marriage rate if the divorcees end up remarrying previously unmarried people in the same population. And this is more likely to happen if the age of marriage is relatively young because there is more time (a possibly desire) to remarry.
+
+If we had the rate of remarrige in the data that would help us test this directly. If we only have the data from the book, then we could reverse the use of $M$ and $D$ from the analysis in section 5.1 to study the potential causal relationship of divorce on marriage.
+
+**5M4.**
+
+Our first step is to find the percentage of Mormon residents per state, collect that data, and add it to the original marriage data (`wd`).
+```{r}
+# Load rvest package to scrape table of LDS population by state from the web
+library(rvest)
+
+# The interwebs led me to this site, which contains a table of population of
+# Mormons by state
+lds_pop_url <- "https://www.worldatlas.com/articles/mormon-population-by-state.html"
+lds_pop <- read_html(lds_pop_url) |>
+  html_element("table") |>
+  html_table()
+
+# We're interested in the state (to match to the Waffle House data) and the
+# percent population. We need to convert the percentage to a number to use it.
+lds_pop1 <- lds_pop |>
+  janitor::clean_names() |>
+  select(state, percentage_of_mormon_residents) |>
+  mutate(lds_perc = as.numeric(sub("%", "", percentage_of_mormon_residents)))
+
+# Now add it to the original marriage data
+wd_lds <- left_join(wd, lds_pop1, by = c("Location" = "state"))
+# Confirm that it worked
+summary(wd_lds$lds_perc)
+```
+
+Now, we estimate the model after standardizing all the variables. We will use the same priors as the book.
+```{r}
+wd_lds <- wd_lds |>
+  mutate(age = standardize(MedianAgeMarriage),
+         mar = standardize(Marriage),
+         div = standardize(Divorce),
+         lds = standardize(lds_perc))
+
+# Define and fit the model
+lds_mdl <- quap(
+  alist(
+    div ~ dnorm(mu, sigma),
+    mu <- a + bm * mar + ba * age + bl * lds,
+    a ~ dnorm(0, 0.2),
+    bm ~ dnorm(0, 0.5),
+    ba ~ dnorm(0, 0.5),
+    bl ~ dnorm(0, 0.5),
+    sigma ~ dexp(1)
+  ),
+  data = wd_lds
+)
+
+# Summarize posterior
+precis(lds_mdl)
+```
