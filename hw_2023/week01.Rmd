@@ -6,10 +6,10 @@ output: html_document
 
 > 1. Suppose the globe tossing data (Lecture 2, Chapter 2) had turned out to be 4 water and 11 land. Construct the posterior distribution.
 ```{r p1}
-# Define the possible values of $p$
-prior <- seq(from = 0, to = 1, by = 0.25)
 # Define the data
 data <- c("W" = 4, "L" = 11)
+# Define the possible values of $p$
+prior <- seq(from = 0, to = 1, by = 0.1)
 # Calculate the posterior and then normalize
 post <- sapply(prior, \(p) p^data["W"] * (1 - p)^data["L"])
 (post <- post / sum(post))
