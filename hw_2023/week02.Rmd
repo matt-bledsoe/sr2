@@ -1,0 +1,270 @@
+---
+title: Solutions for Statistical Rethinking 2023 Homework Week 01
+output: html_document
+--- 
+[Link to problem sheet](https://github.com/rmcelreath/stat_rethinking_2023/blob/main/homework/week02.pdf) 
+
+> 1. From the Howell1 dataset, consider only the people younger than 13 years old. Estimate the causal assosciation between age and weight. Assume that age influences weight through two paths. First, age influences height, and height influences weight. Second, age directly influences weight through age-related changes in muscle growth and body proportions. 
+> 
+> Draw the DAG that represents these causal relationships. And then write a generative simulation that takes age as an input and simulates height and weight, obeying the relationships in the DAG.
+
+```{r}
+# Load libraries
+library(tidyverse)
+library(rethinking)
+library(dagitty)
+
+# Load the data
+data(Howell1)
+d <- Howell1[Howell1$age < 13, ]
+```
+
+Let $A$ be age, $W$ weight, and $H$ height. The DAG for the assumed relationships looks like this.
+
+```{r}
+g <- dagitty("dag{A -> W A -> H H -> W}")
+coordinates(g) <- list(x = c(A = 1, W = 2, H = 0),
+                       y = c(A = 1, W = 0, H = 0))
+drawdag(g)
+```
+
+The generative model we want is something like this.
+
+$$\begin{align}
+W_i &\sim \text{Normal}(\mu_i, \sigma)\\
+\mu_i &= \alpha + \beta (H_i - \overline{H})\\
+\alpha &\sim \text{Normal}(25, 20)\\
+\beta &\sim \text{Uniform}(0, 1)\\
+\sigma &\sim \text{Uniform}(0, 20)\\
+\\
+H_i &\sim \text{Normal}(\nu_i, \tau)\\
+\nu_i &= \alpha_A + \beta_A A\\
+\alpha_A &\sim \text{Normal}(45, 5)\\
+\beta_A &\sim \text{Uniform}(0, 10)\\
+\tau &\sim \text{Uniform}(0, 10)
+\end{align}$$ 
+
+Let's generate some data according to this model.
+```{r}
+sim_hwa <- function(age, b, a) {
+    # Number of samples
+    n <- length(age)
+    # Simulate height per age. Assume average height at age 0 is 45 cm and
+    # average growth per year is 5 cm. Then add some noise.
+    height <- 45 + 5 * age + rnorm(n, 0, 5)
+    # Simulate weight from 
+    weight <- a + b * height + rnorm(n, 0, 5)
+    return(data.frame(age, height, weight))
+}
+
+# 100 samples of each age
+age <- runif(1500, 0, 13) 
+
+s <- sim_hwa(age, b = 0.5, a = 0)
+
+head(s)
+pairs(s)
+```
+
+> 2. Use a linear regression to estimate the **total** effect of each year of growth on weight.
+
+```{r}
+m2_test <- quap(
+    alist(
+        weight ~ dnorm(mu, sigma),
+        mu <- a + b * age,
+        a ~ dnorm(5, 10),
+        b ~ dunif(0, 10),
+        sigma ~ dunif(0, 10)
+    ),
+    data = s
+)
+precis(m2_test)
+
+# Averge change in weight (kg) per change in year of age from generative
+# simulation
+mean(diff(s$weight) / diff(s$age))
+```
+
+From our generative simulation, we see that weight increases about 3 kg per year, while from our test model it's about 2.5 kg. So, looks like the model above is operating correctly. Now, we can model the real sample. 
+
+```{r}
+m2 <- quap(
+    alist(
+        weight ~ dnorm(mu, sigma),
+        mu <- a + b * age,
+        a ~ dnorm(5, 2),
+        b ~ dunif(0, 10),
+        sigma ~ dunif(0, 10)
+    ),
+    data = d
+)
+
+precis(m2)
+
+# Sample from the posterior
+post <- extract.samples(m2)
+# Plot density of mean weights by age
+
+post |>
+  ggplot(aes(x = b)) +
+  geom_density(linewidth = 2) +
+  labs(x = "Posterior mean change in weight (kg) per year", y = "Density") +
+  theme_classic()
+
+# Now simulate weights for various ages
+post_pred <- sim(m2)
+
+post_pred_d <- tibble(
+    age = d$age,
+    weight = d$weight,
+    mu = apply(post_pred, 2, mean),
+    lower = apply(post_pred, 2, PI)[1, ],
+    upper = apply(post_pred, 2, PI)[2, ]
+    )
+
+post_pred_d |>
+  ggplot(aes(x = age)) +
+  geom_point(aes(y = weight), color = "red", shape = 1) +
+  geom_line(aes(y = mu)) +
+  geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.3) +
+  scale_x_continuous(breaks = seq(from = 0, 13)) +
+  labs(x = "Age (yr)", y = "Weight (kg)",
+       title = "Predicted weights compared to sample") +
+  theme_classic()
+```
+
+> 3. Now suppose the causal assosciation between age and weight might be different for boys and girls. Use a single linear regression, with a categorical variable for sex, to estimate the total causal effect of age on weight separately for boys and girls. How do girls and boys differ? Provide one or more posterior contrasts as a summary.
+
+Let's define and fit our model after first defining the `sex` variable to be 1 for girls and 2 for boys.
+```{r}
+d$sex <- d$male + 1
+
+m3 <- quap(
+    alist(
+        weight ~ dnorm(mu, sigma),
+        mu <- a[sex] + b[sex] * age,
+        a[sex] ~ dnorm(5, 2),
+        b[sex] ~ dunif(0, 10),
+        sigma ~ dunif(0, 10)
+    ),
+    data = d
+)
+
+precis(m3, depth = 2)
+```
+
+Now, we can compare the posterior distributions of (1) the average change in weight per year for boys and girls and (2) difference in predicted weights per year for boys and girls.
+
+```{r}
+# Sample from the posterior
+post <- extract.samples(m3)
+
+# Create a dataset for ploting the posteriors, add the contrast of the means
+post_d <- as_tibble(post$b, ..name_repair = "unique") |>
+  `colnames<-`(c("boys", "girls")) |>
+  mutate(diff_mean = girls - boys) |>
+  pivot_longer(cols = everything())
+
+post_d |>
+  ggplot(aes(x = value)) +
+  geom_density(aes(color = name), linewidth = 2, key_glyph = "vline") +
+  scale_color_manual(values = (c("boys" = "red", "girls" = "blue",
+                                 mean_diff = "black"))) +
+  labs(x = "Posterior mean change in weight per year", y = "Density") +
+  theme_classic() +
+  theme(legend.title = element_blank())
+```
+
+From this plot we see that the mean changes in weight per year for boys and girls are very similar, but girls gain a little more per year. The average difference in gain is `r mean(post_d$value[post_d$name == "diff_mean"])`
+
+Now, we simulate weights from the model and inspect their differences across ages.
+
+```{r}
+n <- 1e4
+age <- runif(n, 0, 13)
+with(post, {
+    # Simulate weight for sex = 1 (girls)
+    weight_s1 <- rnorm(n, a[, 1] + b[, 1] * age, sigma)
+    # Simulate weight for sex = 2 (boys)
+    weight_s2 <- rnorm(n, a[, 2] + b[, 2] * age, sigma)
+    # Contrast
+    weight_do_s <<- weight_s1 - weight_s2
+})
+
+tibble(age = age, diff_weight = weight_do_s) |>
+  ggplot(aes(x = diff_weight)) + 
+  geom_density()
+```
+
+> 4. The data in `data(Oxboys)` (`rethinking` package) are growth records for 26 boys measured over 9 periods. I want you to model their growth. Specifically, model the increments in growth from one period (`Occasion` in the data table) to the next. Each increment is simply the difference in height in one occasion and height in the previous occasion. Since none of these boys shrunk during the study, all of the growth increments are greater than zero. Estimate the posterior distribution of these increments. Constrain the distribution so it is always positive--it should not be possible for the model to think that boys can shrink from year to year. Finally compute the posterior distribution of the total growth over all 9 occasions.
+
+First let's load and look at the dataset and add the incremental and total growth variables for analysis.
+
+```{r}
+data(Oxboys)
+str(Oxboys)
+
+ox <- Oxboys
+ox <- ox |>
+  arrange(Subject, Occasion) |>
+  group_by(Subject) |>
+  mutate(growth = c(NA, diff(height)),
+         total_growth = sum(growth, na.rm = TRUE)) |>
+  ungroup()
+
+ox |>
+  ggplot(aes(x = age, y = growth)) +
+  geom_point()
+
+ox |>
+  ggplot(aes(x = growth)) +
+  geom_histogram()
+```
+
+We start with modeling the incremental growth. We will assume that it is log-normal to enforce that it is positive.
+
+```{r}
+m4_increment <- quap(
+    alist(
+        growth ~ dlnorm(mu, sigma),
+        mu ~ dnorm(0, 1),
+        sigma ~ dexp(1)
+    ),
+    data = list(growth = ox$growth[!is.na(ox$growth)])
+)
+
+precis(m4_increment)
+
+post <- extract.samples(m4_increment, n = 9000)
+post_pred <- rlnorm(n = nrow(post), post$mu, post$sigma)
+ggplot() +
+  geom_density(data = data.frame(pred_growth = post_pred),
+               mapping = aes(x = pred_growth,
+               color = "Predicted")) +
+  geom_density(data = ox[, "growth"],
+               mapping = aes(x = growth,
+               color = "Actual")) +
+  scale_color_manual(values = c("Predicted" = "black", "Actual" = "red")) +
+  labs(x = "Incremental Growth", color = "") +
+  coord_cartesian(xlim = c(0, 5)) +
+  theme_classic() +
+  theme(legend.position = "right")
+```
+
+Now for the total growth. 
+
+```{r}
+pred_total_growth <- data.frame(subj = sort(rep(1:1000, 9)),
+                                pred_growth = post_pred) |>
+  group_by(subj) |>
+  summarize(pred_total_growth = sum(pred_growth))
+
+ggplot() +
+  geom_density(data = pred_total_growth,
+               mapping = aes(x = pred_total_growth, color = "Predicted")) +
+  geom_density(data = ox,
+             mapping = aes(x = total_growth, color = "Actual")) +
+  scale_color_manual(values = c("Predicted" = "black", "Actual" = "red")) +
+  theme_classic()
+```
