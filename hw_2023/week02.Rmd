@@ -162,7 +162,7 @@ post <- extract.samples(m3)
 
 # Create a dataset for ploting the posteriors, add the contrast of the means
 post_d <- as_tibble(post$b, ..name_repair = "unique") |>
-  `colnames<-`(c("boys", "girls")) |>
+  `colnames<-`(c("girls", "boys")) |>
   mutate(diff_mean = girls - boys) |>
   pivot_longer(cols = everything())
 
@@ -176,7 +176,7 @@ post_d |>
   theme(legend.title = element_blank())
 ```
 
-From this plot we see that the mean changes in weight per year for boys and girls are very similar, but girls gain a little more per year. The average difference in gain is `r mean(post_d$value[post_d$name == "diff_mean"])`
+From this plot we see that the mean changes in weight per year for boys and girls are very similar, but boys gain a little more per year. The average difference in gain is `r mean(post_d$value[post_d$name == "diff_mean"])`
 
 Now, we simulate weights from the model and inspect their differences across ages.
 
@@ -236,7 +236,7 @@ m4_increment <- quap(
 
 precis(m4_increment)
 
-post <- extract.samples(m4_increment, n = 9000)
+post <- extract.samples(m4_increment, n = 8000)
 post_pred <- rlnorm(n = nrow(post), post$mu, post$sigma)
 ggplot() +
   geom_density(data = data.frame(pred_growth = post_pred),
@@ -255,7 +255,7 @@ ggplot() +
 Now for the total growth. 
 
 ```{r}
-pred_total_growth <- data.frame(subj = sort(rep(1:1000, 9)),
+pred_total_growth <- data.frame(subj = sort(rep(1:1000, 8)),
                                 pred_growth = post_pred) |>
   group_by(subj) |>
   summarize(pred_total_growth = sum(pred_growth))
