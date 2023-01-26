@@ -199,4 +199,298 @@ lds_mdl <- quap(
 
 # Summarize posterior
 precis(lds_mdl)
+
+# Visualize the posterior
+plot(coeftab(lds_mdl))
+```
+
+Let's look at the model's posterior predictive plots to see if improves on m5.3 from the book (cf. pg. 138).
+
+```{r}
+mu <- link(lds_mdl)
+
+mu_mean <- apply(mu, 2, mean)
+mu_pi <- apply(mu, 2, PI)
+
+div_sim <- sim(lds_mdl, n = 1e4)
+div_pi <- apply(div_sim, 2, PI)
+
+post_pred_plot_data <- tibble(
+  div = wd_lds$div,
+  mu = mu_mean,
+  loc = levels(wd_lds$Loc)
+) |>
+bind_cols(t(mu_pi)) |>
+mutate(pred_diff = mu - div,
+       rank = row_number(pred_diff),
+       poorly_pred = if_else(rank <= 3 | rank >= 48, loc, ""))
+
+post_pred_plot_data |>
+  ggplot() +
+  geom_point(aes(x = div, y = mu), shape = "o", size = 5, color = rangi2) +
+  geom_segment(aes(x = div, xend = div, y = `5%`, yend = `94%`),
+               color = rangi2) +
+  geom_abline(slope = 1, intercept = 0, linetype = 2) +
+  geom_text(aes(x = div, y = mu, label = poorly_pred), nudge_x = 0.1) +
+  labs(x = "Observed divorce", y = "Predicted divorce")
+```
+
+I've labeled the states whose predictions have the largest positive and largest negative distances from the observed values. ID and UT no longer appear above the dashed line, likely because of controlling for the presence of Mormons.
+
+**5M5.**
+
+Let $G$ be the price of gasoline, $O$ the obesity rate, $E$ be a measure of exercise, and $R$ be a measure of eating out at restaurants. The mechanisms we are interested in can be shown in this DAG:
+
+```{r}
+library(dagitty)
+
+g <- dagitty("dag{
+  G -> E 
+  G -> R
+  E -> O
+  R -> O 
+  }")
+coordinates(g) <- list(x = c(G = 0, E = -1, R = 1, O = 0),
+                       y = c(G = 1, E = 2, R = 2, O = 3))
+drawdag(g)
+```
+
+It's possible that there's an association between $E$ and $R$ (say, the more you exercise, the more you care about health, the less likely you are to eat out), but we are definitely interested in whether, conditional on $E$ and $R$, $G$ and $O$ are still related. A model that uses $G$, $R$, and $E$ to predict $O$ compared to a model with just $G$ predicting $O$ would allow us to understand this.
+
+**5H1.**
+
+Let's create the DAG with `dagitty` to check the implied conditional independencies.
+
+```{r}
+dag_5h1 <- dagitty("dag{M -> A -> D}")
+impliedConditionalIndependencies(dag_5h1)
+```
+
+So, the only one implied by the DAG is that once we know $A$, $D$ and $M$ are independent. This is consistent with the data, as discussed in the chapter.
+
+**5H2.**
+
+Let's fit a model for the DAG $M\rightarrow A\rightarrow D$. We only need the models $M\rightarrow A$ and $A\rightarrow M$.
+
+```{r}
+# Create dataset for this model
+d_5h2 <- wd |>
+  select(Divorce, Marriage, MedianAgeMarriage) |>
+  mutate(div = standardize(Divorce),
+         mar = standardize(Marriage),
+         age = standardize(MedianAgeMarriage))
+m_5h2 <- quap(
+  alist(
+    # M -> A
+    age ~ dnorm(mu_age, sigma_age),
+    mu_age <- a_age + b_m * mar,
+    a_age ~ dnorm(0, 0.2),
+    b_m ~ dnorm(0, 0.5),
+    sigma_age ~ dexp(1),
+    # A -> D
+    div ~ dnorm(mu, sigma),
+    mu <- a + b * age,
+    a ~ dnorm(0, 0.2),
+    b ~ dnorm(0, 0.5),
+    sigma ~ dexp(1)
+  ),
+  data = d_5h2
+)
+```
+
+Now, let's look at the effect of halving the marriage rate.
+
+```{r}
+sim_d <- data.frame(mar = (d_5h2$Marriage / 2 - mean(d_5h2$Marriage)) /
+                            sd(d_5h2$Marriage))
+s <- sim(m_5h2,
+         data = sim_d,
+         vars = c("age", "div"))
+
+plot_data_5h2 <- tibble(
+  mar = sim_d$mar,
+  mu_age = colMeans(s$age),
+  mu_div = colMeans(s$div)
+)
+
+age_pi <- apply(s$age, 2, PI) |>
+  t() |>
+  as_tibble() |>
+  `colnames<-`(c("age_lower", "age_upper"))
+
+div_pi <- apply(s$div, 2, PI) |>
+  t() |>
+  as_tibble() |>
+  `colnames<-`(c("div_lower", "div_upper"))
+
+plot_data_5h2 <- bind_cols(plot_data_5h2, age_pi, div_pi)
+
+# Plot counterfactual effects
+p1 <- plot_data_5h2 |>
+  ggplot(aes(x = mar)) +
+  geom_line(aes(y = mu_age)) +
+  geom_ribbon(aes(ymin = age_lower, ymax = age_upper), color = "gray",
+                  alpha = 0.3) +
+  labs(x = "Manipulated Marriage Rate",
+       y = "Counterfactual Median Age at Marriage",
+       title = "Counterfactual effect of halving M on A") +
+  theme_minimal()
+
+p2 <- plot_data_5h2 |>
+  ggplot(aes(x = mar)) +
+  geom_line(aes(y = mu_div)) +
+  geom_ribbon(aes(ymin = div_lower, ymax = div_upper), color = "gray",
+                  alpha = 0.3) +
+  labs(x = "Manipulated Marriage Rate",
+       y = "Counterfactual Divorce Rate",
+       title = "Total counterfactual effect of halving M on D") +
+  theme_minimal()
+
+gridExtra::grid.arrange(p2, p1, nrow = 1)
+```
+
+**5H3.**
+
+We will need to build two models: one for the entire DAG and one that models the effect of $M$ on $N$.
+
+```{r}
+m_5h3 <- quap(
+  alist(
+        k ~ dnorm(mu, sigma),
+        mu <- a + bm * m + bn * n,
+        a ~ dnorm(0, 0.2),
+        bm ~ dnorm(0, 0.5),
+        bn ~ dnorm(0, 0.5),
+        sigma ~ dexp(1),
+        n ~ dnorm(mu_n, sigma_n),
+        mu_n <- a_n + b_m * m,
+        a_n ~ dnorm(0, 0.2),
+        b_m ~ dnorm(0, 0.5),
+        sigma_n ~ dexp(1)
+  ),
+  data = md_complete
+)
+
+# summary of parameters
+precis(m_5h3)
+```
+
+Now, we begin our counterfactual investigation following the recipe starting on p. 141 of the text.
+
+```{r}
+# Double M and standardize with the original variable's mean and sd. M is 
+# on a log scale, so we add log(2) in order to double M on the original scale.
+m_seq <- (log(2) + md_complete$m - mean(md_complete$m)) / sd(md_complete$m)
+sim_d <- data.frame(m = m_seq)
+
+# Simulate N and K
+s <- sim(m_5h3, data = sim_d, vars = c("n", "k"))
+
+# Create data for plotting
+plot_data_5h3 <- sim_d |>
+  mutate(mu_n = colMeans(s$n),
+         mu_k = colMeans(s$k))
+
+pi_kn <- s |>
+  lapply(\(x) apply(x, 2, PI)) |>
+  lapply(\(x) as_tibble(t(x))) |>
+  imap(\(x, i) `colnames<-`(x, paste(i, c("lower", "upper"), sep = "_"))) |>
+  bind_cols()
+
+plot_data_5h3 <- bind_cols(plot_data_5h3, pi_kn)
+
+# Plot the counterfactual effects
+p1 <- plot_data_5h3 |>
+  ggplot(aes(x = m)) + 
+  geom_line(aes(y = mu_k)) +
+  geom_ribbon(aes(ymin = k_lower, ymax = k_upper),
+              color = "gray", alpha = 0.3) +
+  labs(x = "Manipulated M", y = "Counterfactual K",
+       title = "Total counterfactual effect on K of doubling M") +
+  theme_classic()
+p2 <- plot_data_5h3 |>
+  ggplot(aes(x = m)) + 
+  geom_line(aes(y = mu_n)) +
+  geom_ribbon(aes(ymin = n_lower, ymax = n_upper), color = "gray", alpha = 0.3) +
+  labs(x = "Manipulated M", y = "Counterfactual N",
+       title = "Counterfactual effect on N of doubling M") +
+  theme_classic()
+
+gridExtra::grid.arrange(p1, p2, ncol = 2)
+```
+
+**5H4.**
+
+My first thought is that "Southerness" influences the age at marriage, which, in turn, influences the divorce and marriange rates as detailed in the text (starting on p. 129). In the South, the influence of America's Judeo-Christian heritage and its positive view on marriage is stronger than in other regions. Therefore, Southerners tend to marry earlier than in other regions. But, as explained in the text, getting married younger allows for more opportunity for divorce. 
+
+The DAG illustrating this is a slight modification of the one on p. 129 with the variable $S$ representing the binary variable of "Southerness".
+
+```{r}
+south_dag <- dagitty("dag{S -> A; A -> M; A -> D}")
+coordinates(south_dag) <- list(
+  x = c(A = 0, D = 1, M = 2, S = 0),
+  y = c(A = 0, D = 1, M = 0, S = -1)
+)
+drawdag(south_dag)
+
+# Implied conditional independencies
+impliedConditionalIndependencies(south_dag)
+```
+
+We can now test the various conditional independencies implied by this DAG by building models. First note that the independence of $D$ and $M$ conditional on $A$ was already investigated in the text, so we will focus on the other two.
+
+```{r}
+# Convert the dummy variable `South` to an index where 1 means non-Southern and
+# 2 means Southern
+wd_lds$south <- as.integer(wd_lds$South + 1)
+# Modeling the DAG
+m_5h4 <- quap(
+  alist(
+    # S -> A
+    age ~ dnorm(mu_age, sigma_age),
+    mu_age <- a_age[south],
+    a_age[south] ~ dnorm(0, 0.5),
+    sigma_age ~ dunif(0, 50),
+    # A -> D <- M
+    div ~ dnorm(mu, sigma),
+    mu <- a + bm * mar + ba * age,
+    a ~ dnorm(0, 0.2),
+    bm ~ dnorm(0, 0.5),
+    ba ~ dnorm(0, 0.5),
+    sigma ~ dexp(1),
+    # A -> M
+    mar ~ dnorm(mu_mar, sigma_mar),
+    mu_mar <- a_mar + ba2 * age,
+    a_mar ~ dnorm(0, 0.2),
+    ba2 ~ dnorm(0, 0.5),
+    sigma_mar ~ dexp(1)
+  ),
+  data = wd_lds
+)
+# Model divorce and southerness
+m_div_south <- quap(
+  alist(
+    div ~ dnorm(mu, sigma),
+    mu <- a[south],
+    a[south] ~ dnorm(0, 0.5),
+    sigma ~ dexp(1)
+  ),
+  data = wd_lds
+)
+precis(m_div_south, depth = 2)
+
+```
+precis(m_5h4, depth = 2)
+
+mu <- link(m_5h4)
+mu_mean <- map_df(mu, \(x) apply(x, 2, mean)) |>
+  bind_cols(wd_lds[, c("div", "mar", "age", "south")])
+mu_resid <- mu_mean |>
+  mutate(resid_mar = mar - mu_mar,
+         resid_div = div - mu,
+         resid_age = age - mu_age)
+
+mu_resid |>
+  ggplot() +
+  geom_point(aes(x = resid_age, div))
 ```
