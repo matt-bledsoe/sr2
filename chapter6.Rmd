@@ -1,0 +1,83 @@
+---
+title: Chapter 6 Problems and Notes
+output: html_document
+---
+
+```{r setup}
+library(rethinking)
+library(tidyverse)
+```
+
+# Practice
+
+**6E1.**
+
+Three mechanisms by which multiple regression can produce false inferences about causal effects are _multicollinearity_, _post-treament bias_, and _collider bias_.
+
+**6E2.**
+
+In my line of work, we are interested in predicting the proportion of borrowers in a portfolio of loans that will default given certain economic conditions. Economic conditions can be described by a variety of factors many of which are highly correlated. Using the unemployment rate and the change in the level of disposable income to predict the rate of default would be an example of post-treatment bias. Borrowers lose their jobs cause them to have less income which causes default.
+
+**6E3.**
+
+The four elemental confounds are the _fork_, the _pipe_, the _collider_, and the _descendant_. 
+
+* In the _fork_, $X$ and $Y$ have a common cause $Z$, so $X$ "knows" about $Y$ only because $X$ "knows" about $Z$. Conditioning a model on $Z$ removes the association between $X$ and $Y$. 
+
+* In the _pipe_, the causal path betwen $X$ and $Y$ flows through $Z$. Therefore, conditioning a model on $Z$ removes the association of $X$ on $Y$.
+
+* In the _collider_, $X$ and $Y$ are causes of $Z$. Conditioning a model on $Z$ opens a non-causal association between $X$ and $Y$ because $Z$ "knows" about both of them. 
+
+* In the _descendant_, a variable $D$ is caused by $Z$. $Z$ could be a part of any of the previous three confounds. Conditioning on $D$ has the effect of partially conditioning on $Z$, so the effect on $X$ and $Y$ would be as above, though only partially.
+
+**6E4.**
+
+A biased sample is like conditioning on a collider because it can induce associations that don't exist.
+
+**6M1.**
+
+There are now 5 paths from $X$ to $Y$. The additional paths are the paths from p. 186 but going from $C$ through $V$ to get to $Y$. Both of the new paths are closed: the path $X\leftarrow U\rightarrow B\leftarrow C\leftarrow V\rightarrow Y$ has the collider $U\rightarrow B\leftarrow C$ in it (just like the original one in the book); the path $X\leftarrow U\leftarrow A\rightarrow C\leftarrow V\rightarrow Y$ has the collider $A\rightarrow C\leftarrow V$ in it. So, the only path that must be closed is still $X\leftarrow U\leftarrow A\rightarrow C\rightarrow Y$. Now, we must condition on $A$ (we had a choice of $A$ and $C$ before) because if we condition on $C$, we will open the second closed path above. 
+
+**6M2.**
+
+```{r}
+n <- 1000
+b_xz <- 1
+b_zy <- 0.5
+x <- rnorm(n)
+z <- rnorm(n, b_xz * x)
+cor(x, z)
+y <- rnorm(n, b_zy * z)
+
+m_6m2 <- quap(
+    alist(
+        y ~ dnorm(mu, sigma),
+        mu <- a + bx * x + bz * z,
+        c(bx, bz) ~ dnorm(1, 2),
+        a ~ dnorm(0, 1),
+        sigma ~ dexp(1)
+    ),
+    data = data.frame(x, y , z)
+)
+
+precis(m_6m2)
+plot(coeftab(m_6m2))
+
+post <- extract.samples(m_6m2)
+plot(bx ~ bz, post)
+dens(post$bx + post$bz)
+```
+
+We don't observe multicollinearity in this example. The coefficients on `bx` and `bz` are somewhat wide, but with `bx` very close to zero and `bz` reliably far away from it. In this example once we know $Z$ we know that $X$ must be pretty close to zero because all the association between $X$ and $Y$ is in $Z$. This differs from the leg example in the book because, while the heights of the two legs are correlated like $X$ and $Y$, the height of one leg doesn't cause the height of the other. 
+
+**6M3.** 
+
+Let's analyze each DAG.
+
+* _Top Left_ - There are two backdoor open paths: (1) $X\leftarrow Z\leftarrow A\rightarrow Y$ and (2) $X\leftarrow Z\rightarrow Y$. We can close both of them by conditioning on $Z$.
+
+* _Top Right_ - There are no backdoor paths into $X$, so we do not need to close anything.
+
+* _Bottom Left_ - There is one backdoor path from $X$ to $Y$: $X\leftarrow A\rightarrow Z\leftarrow Y$. This path is closed because of the collider with $Z$ in the middle. So, we do not need to condition on anything.
+
+* _Bottom Right_ - There is one open backdoor path from $X$ to $Y$: $X\leftarrow A\rightarrow Z\rightarrow Y$. This can be closed by conditioning on $Z$.
