@@ -1,5 +1,5 @@
 ---
-title: Solutions for Statistical Rethinking 2023 Homework Week 01
+title: Solutions for Statistical Rethinking 2023 Homework Week 02
 output: html_document
 --- 
 [Link to problem sheet](https://github.com/rmcelreath/stat_rethinking_2023/blob/main/homework/week02.pdf) 

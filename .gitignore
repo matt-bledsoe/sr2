@@ -2,3 +2,5 @@
 *_cache/
 .Rproj.user
 *.Rhistory
+*.png
+.DS_Store

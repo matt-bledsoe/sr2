@@ -37,7 +37,7 @@ The influence of $A$ on $F$ has only one path, the direct one. Therefore, there 
 # Create dataset of variables and standardize
 d <- data.frame(a = standardize(foxes$area),
                 f = standardize(foxes$avgfood),
-                g = foxes$groupsize,
+                g = standardize(foxes$groupsize),
                 w = standardize(foxes$weight))
 
 # Fit a model
@@ -70,7 +70,7 @@ m2 <- quap(
         w ~ dnorm(mu, sigma),
         mu <- c + bf * f,
         c ~ dnorm(0, 0.2),
-        bf ~ dnorm(0, 1),
+        bf ~ dnorm(0, 0.5),
         sigma ~ dexp(1)
     ),
     data = d
@@ -80,88 +80,50 @@ precis(m2)
 
 post <- extract.samples(m2)
 dens(post$bf)
-
-s <- sim(m2, n = 1e5)
-mu_w <- apply(s, 2, mean)
-pi_w <- apply(s, 2, PI)
-
-data.frame(f = d$f,
-           w = d$w,
-           mu_w = mu_w,
-           lower = pi_w[1, ],
-           upper = pi_w[2, ]) |>
-  ggplot(aes(x = f)) +
-  geom_point(aes(y = w), color = rangi2) +
-  geom_line(aes(y = mu_w), color = "black") +
-  geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.2)
 ```
 
-There does not appear to be any effect of $F$ on $W$ based on this model and these data. 
+There does not appear to be much of an effect of $F$ on $W$ based on this model and these data. 
 
-We can calculate the causal effect of adding food by simulating an intervention:
+> 3. Infer the **direct** causal effect of adding food $F$ to a territory on the weight $W$ of foxes. In light of your estimates from this problem and the previous one, what do you think is going on with these foxes?
+
+We can calculate the direct effect of adding food by conditioning on $G$:
 
 ```{r}
-m2_a <- quap(
+m3 <- quap(
     alist(
         ## F -> W <- G
         w ~ dnorm(mu, sigma),
         mu <- c + bf * f + bg * g,
         c ~ dnorm(0, 0.2),
-        bf ~ dnorm(0, 1),
+        bf ~ dnorm(0, 0.5),
         bg ~ dnorm(0, 0.5),
         sigma ~ dexp(1),
-
-        # F -> G
-        g ~ dnorm(mu_g, sigma_g),
-        mu_g <- cg + bfg * f,
-        cg ~ dunif(0, 10), # Group size must be positive
-        bfg ~ dnorm(0, 1),
-        sigma_g ~ dexp(1)
     ),
     data = d
 )
 
-precis(m2_a)
-
-# Simulate food
-f_seq <- seq(from = -2, to = 2, length.out = 40)
-s <- sim(m2_a, data = data.frame(f = f_seq), vars = c("g", "w"))
-
-avg_s <- lapply(s, colMeans)
-pi_s <- lapply(s, \(x) apply(x, 2, PI))
-
-plot_data <- tibble(
-    f = f_seq,
-    avg_g = avg_s$g,
-    lower_g = pi_s$g[1, ],
-    upper_g = pi_s$g[2, ],
-    avg_w = avg_s$w,
-    lower_w = pi_s$w[1, ],
-    upper_w = pi_s$w[2, ]
-)
-
-p1 <- plot_data |>
-  ggplot(aes(x = f)) + 
-  geom_line(aes(y = avg_w)) + 
-  geom_ribbon(aes(ymin = lower_w, ymax = upper_w), alpha = 0.2) +
-  labs(x = "Counterfactual F", y = "Counterfactual W",
-       title = "Total counterfactual effect of F on W") +
-  theme_classic()
-
-p2 <- plot_data |>
-  ggplot(aes(x = f)) + 
-  geom_line(aes(y = avg_g)) + 
-  geom_ribbon(aes(ymin = lower_g, ymax = upper_g), alpha = 0.2) +
-  labs(x = "Counterfactual F", y = "Counterfactual G",
-       title = "Counterfactual effect of F on G") +
-  theme_classic()
-
-gridExtra::grid.arrange(p1, p2, nrow = 1)
+precis(m3)
 ```
 
-> 3. Infer the **direct** causal effect of adding food $F$ to a territory on the weight $W$ of foxes. In light of your estimates from this problem and the previous one, what do you think is going on with these foxes?
+Based on this model, the direct effect of an increase of food is an increase in weight, but the effect of group size increase cancels it out.
 
-I think that as more food is available in a given area, it attracts more foxes to the group. The amount of food per fox stays relatively constant so that the weight of each fox doesn't change. 
+I think that as more food is available in a given area, it attracts more foxes to the group. The amount of food per fox stays relatively constant so that the weight of each fox doesn't change. We can confirm this by modeling the direct effect of $F$ on $G$.
+
+```{r}
+m3_a <- quap(
+    alist(
+        g ~ dnorm(mu, sigma),
+        mu <- cg + bg * f,
+        cg ~ dnorm(0, 0.2),
+        bg ~ dnorm(0, 0.5),
+        sigma ~ dexp(1)
+    ),
+    data = d
+)
+precis(m3_a)
+```
+
+This model clearly shows that an increase in $F$ is strongly associated with an increase in $G$, confirming our story.
 
 > 4. Suppose there is an unobserved confound that influences $F$ and $G$, like this:
 
@@ -183,3 +145,5 @@ drawdag(fox_dag2)
 ```
 
 > Assuming the DAG above is correct, again estimate the total and direct causal effects of $F$ on $W$. What impact does the unobserved confound have?
+
+Apparently, this is a trick question. We can't find the total effect because we would have to condition on $U$, which is unobservable. The direct effect of $F$ on $W$ has already been estimated in #3.
