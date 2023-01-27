@@ -1,0 +1,185 @@
+---
+title: Solutions for Statistical Rethinking 2023 Homework Week 03
+output: html_document
+--- 
+[Link to problem sheet](https://github.com/rmcelreath/stat_rethinking_2023/blob/main/homework/week03.pdf) 
+
+```{r setup, echo=FALSE, message=FALSE}
+library(rethinking)
+library(dagitty)
+library(tidyverse)
+
+data(foxes)
+```
+
+> 1. The first two problems are based on the same data. The data in `data(foxes)` are 116 foxes from 30 different urban groups in England. These fox groups are like street gangs. Group size (`groupsize`) varies from 2 to 8 individuals. Each group maintains its own (almost exclusive) urban territory. Some territories are larger than others. The `area` variable encodes this information. Some territories also have more `avgfood` than others. And food influences the `weight` of each fox. Assume this DAG:
+```{r echo=FALSE}
+fox_dag <- dagitty('dag{
+    A [pos="0, -0.5"]
+    F [pos="-0.5, 0"]
+    G [pos="0.5, 0"]
+    W [pos="0, 0.5"]
+    A -> F
+    F -> G
+    F -> W
+    G -> W
+    }')
+drawdag(fox_dag)
+```
+
+> where $F$ is `avgfood`, $G$ is `groupsize`, $A$ is `area`, and $W$ is `weight`.
+> 
+> Use the backdoor criterion and estimate the total causal influence of $A$ on $F$. What effect would increasing the area of a territory have on the amount of food inside it?
+
+The influence of $A$ on $F$ has only one path, the direct one. Therefore, there are no backdoors to consider, and we can get the total influence with just regressing $F$ on $A$. 
+
+```{r}
+# Create dataset of variables and standardize
+d <- data.frame(a = standardize(foxes$area),
+                f = standardize(foxes$avgfood),
+                g = foxes$groupsize,
+                w = standardize(foxes$weight))
+
+# Fit a model
+m1 <- quap(
+    alist(
+        f ~ dnorm(mu, sigma),
+        mu <- c + b * a,
+        c ~ dnorm(0, 0.2), # tight around zero for standardized variables
+        b ~ dnorm(0, 1), # should be positive, but not sure
+        sigma ~ dexp(1)
+    ),
+    data = d
+)
+
+precis(m1)
+
+post <- extract.samples(m1)
+dens(post$b)
+```
+
+According to this model and these data, increasing the area of the group by one standard deviation would increase the amount of food between 0.8 and 0.95 standard deviations. 
+
+> 2. Infer the **total** causal effect of adding food $F$ to a territory on the weight $W$ of foxes. Can you calculate the causal effect by simulating an intervention on food?
+
+According to the DAG, $F$ affects $W$ through two paths: directly and through $G$. There are no backdoors from $F$ to $W$, so there is nothing else to condition on. 
+
+```{r}
+m2 <- quap(
+    alist(
+        w ~ dnorm(mu, sigma),
+        mu <- c + bf * f,
+        c ~ dnorm(0, 0.2),
+        bf ~ dnorm(0, 1),
+        sigma ~ dexp(1)
+    ),
+    data = d
+)
+
+precis(m2)
+
+post <- extract.samples(m2)
+dens(post$bf)
+
+s <- sim(m2, n = 1e5)
+mu_w <- apply(s, 2, mean)
+pi_w <- apply(s, 2, PI)
+
+data.frame(f = d$f,
+           w = d$w,
+           mu_w = mu_w,
+           lower = pi_w[1, ],
+           upper = pi_w[2, ]) |>
+  ggplot(aes(x = f)) +
+  geom_point(aes(y = w), color = rangi2) +
+  geom_line(aes(y = mu_w), color = "black") +
+  geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.2)
+```
+
+There does not appear to be any effect of $F$ on $W$ based on this model and these data. 
+
+We can calculate the causal effect of adding food by simulating an intervention:
+
+```{r}
+m2_a <- quap(
+    alist(
+        ## F -> W <- G
+        w ~ dnorm(mu, sigma),
+        mu <- c + bf * f + bg * g,
+        c ~ dnorm(0, 0.2),
+        bf ~ dnorm(0, 1),
+        bg ~ dnorm(0, 0.5),
+        sigma ~ dexp(1),
+
+        # F -> G
+        g ~ dnorm(mu_g, sigma_g),
+        mu_g <- cg + bfg * f,
+        cg ~ dunif(0, 10), # Group size must be positive
+        bfg ~ dnorm(0, 1),
+        sigma_g ~ dexp(1)
+    ),
+    data = d
+)
+
+precis(m2_a)
+
+# Simulate food
+f_seq <- seq(from = -2, to = 2, length.out = 40)
+s <- sim(m2_a, data = data.frame(f = f_seq), vars = c("g", "w"))
+
+avg_s <- lapply(s, colMeans)
+pi_s <- lapply(s, \(x) apply(x, 2, PI))
+
+plot_data <- tibble(
+    f = f_seq,
+    avg_g = avg_s$g,
+    lower_g = pi_s$g[1, ],
+    upper_g = pi_s$g[2, ],
+    avg_w = avg_s$w,
+    lower_w = pi_s$w[1, ],
+    upper_w = pi_s$w[2, ]
+)
+
+p1 <- plot_data |>
+  ggplot(aes(x = f)) + 
+  geom_line(aes(y = avg_w)) + 
+  geom_ribbon(aes(ymin = lower_w, ymax = upper_w), alpha = 0.2) +
+  labs(x = "Counterfactual F", y = "Counterfactual W",
+       title = "Total counterfactual effect of F on W") +
+  theme_classic()
+
+p2 <- plot_data |>
+  ggplot(aes(x = f)) + 
+  geom_line(aes(y = avg_g)) + 
+  geom_ribbon(aes(ymin = lower_g, ymax = upper_g), alpha = 0.2) +
+  labs(x = "Counterfactual F", y = "Counterfactual G",
+       title = "Counterfactual effect of F on G") +
+  theme_classic()
+
+gridExtra::grid.arrange(p1, p2, nrow = 1)
+```
+
+> 3. Infer the **direct** causal effect of adding food $F$ to a territory on the weight $W$ of foxes. In light of your estimates from this problem and the previous one, what do you think is going on with these foxes?
+
+I think that as more food is available in a given area, it attracts more foxes to the group. The amount of food per fox stays relatively constant so that the weight of each fox doesn't change. 
+
+> 4. Suppose there is an unobserved confound that influences $F$ and $G$, like this:
+
+```{r echo=FALSE}
+fox_dag2 <- dagitty('dag{
+    A [pos="-0.5, -0.5"]
+    F [pos="-0.5, 0"]
+    G [pos="0.5, 0"]
+    W [pos="0, 0.5"]
+    U [unobserved, pos="0.5, -0.5"]
+    A -> F
+    F -> G
+    U -> F
+    U -> G
+    F -> W
+    G -> W
+    }')
+drawdag(fox_dag2)
+```
+
+> Assuming the DAG above is correct, again estimate the total and direct causal effects of $F$ on $W$. What impact does the unobserved confound have?
