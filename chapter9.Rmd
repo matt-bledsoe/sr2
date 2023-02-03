@@ -1,0 +1,216 @@
+---
+title: Chapter 9 Problems and Notes
+output: html_document
+---
+
+```{r setup}
+library(rethinking)
+library(tidyverse)
+.pardefault <- par()
+```
+
+# Notes
+
+Working through the process starting in section 5.4 (p. 279ff).
+
+```{r}
+# Load the dataset
+data(rugged)
+d <- rugged |>
+  mutate(log_gdp = log(rgdppc_2000)) |>
+  # Drop missing cases of the output variable
+  drop_na(log_gdp) |>
+  # Scale the output, the predictor, and define an index for whether the country
+  # is in Africa or not
+  mutate(log_gdp_std = log_gdp / mean(log_gdp),
+         rugged_std = rugged / max(rugged),
+         cid = ifelse(cont_africa == 1, 1, 2))
+
+# Move the variables of interest into a list
+dat_slim <- list(
+    log_gdp_std = d$log_gdp_std,
+    rugged_std = d$rugged_std,
+    cid = as.integer(d$cid)
+)
+
+# Fit the model using ulam
+m9_1 <- ulam(
+    alist(
+        log_gdp_std ~ dnorm(mu, sigma),
+        mu <- a[cid] + b[cid] * (rugged_std - 0.215),
+        a[cid] ~ dnorm(1, 0.1),
+        b[cid] ~ dnorm(0, 0.3),
+        sigma ~ dexp(1)
+    ),
+    data = dat_slim,
+    chains = 1
+)
+
+# Summarize posterior
+precis(m9_1, depth = 2)
+
+# Fit again with 4 chains
+m9_1 <- ulam(
+    alist(
+        log_gdp_std ~ dnorm(mu, sigma),
+        mu <- a[cid] + b[cid] * (rugged_std - 0.215),
+        a[cid] ~ dnorm(1, 0.1),
+        b[cid] ~ dnorm(0, 0.3),
+        sigma ~ dexp(1)
+    ),
+    data = dat_slim,
+    chains = 4,
+    cores = 4
+)
+
+# Use show
+show(m9_1)
+
+# And inspect the summary again
+precis(m9_1, depth = 2)
+
+# Plot the samples 
+pairs(m9_1)
+
+# Trace plot
+traceplot(m9_1)
+
+# Trank plot
+trankplot(m9_1)
+```
+
+```{r}
+# Reset grapical parameters
+par(.pardefault)
+```
+# Practice
+
+**9E1.**
+
+Of the three options, the only requirement of the simple Metropolis algorithm is (3) the proposal distribution must be symmetric.
+
+**9E2.**
+
+The Gibbs sampler achieves its greater efficiency over the Metropolis algorithm by using _adaptive proposals_. This requires the use of _conjugate priors_, which have anayltical solutions. This additional knowledge allows the Gibbs sampler to adapt is proposal probabilities so that it explores the posterior distribution more efficiently. 
+
+The limitations to Gibbs sampling are as follows.
+
+1. The Gibbs sampler requires conjugate priors, which may be restrictive or pathological in some cases.
+
+2. The sampler, as the number of parameters grow, can get stuck in small regions of the posterior for a long time. This reduces its efficiency because it can't explore the entire posterior quickly.
+
+**9E3.**
+
+HMC cannot handle parameters that follow a discrete distribution. The design of HMC requires a random direction _and_ a random momentum. The latter requires a continuous space.
+
+**9E4.**
+
+In the Central Limit Theorem, we know that the uncertainty about a parameter of a distribution, say the mean, from estimating it with the average of $N$ independent draws from the distribution is proportional to $1/\sqrt N$. Markov chains are typically autocorrelated, so the samples are not independent. The effective sample size, $N_{eff}$, produced by Stan is an estimate of a sample size that plays the same role as $N$ above, but in the context of Markov chains. The larger the autocorrelation, the lower the effective sample size. So, usually, $N_{eff}$ < $N$ where $N$ here is the actual number of samples used by Stan to estimate the posterior. In the case where there is little dependence among the parameters and the posterior is approximately Gaussian, Stan can produce $N_{eff}>N$. I used the Stan reference manual [https://mc-stan.org/docs/2_21/reference-manual/effective-sample-size-section.html]
+
+**9E5.**
+
+The $\hat R$ statistic converges to 1 when the sampler is working correctly.
+
+**9E6.**
+
+I think of a bad traceplot looking like something that is autocorrelated, while a good one is stationary. I can get this behavior with a random walk.
+```{r}
+tibble(index = 1:1000,
+       bad = cumsum(c(0, rnorm(999, mean = 0, sd = 1))),
+       good = c(NA, diff(bad))) |>
+  pivot_longer(-index) |>
+  ggplot(aes(x = index, y = value)) +
+  geom_line() +
+  facet_grid(rows = "name", scales = "free_y") +
+  theme_classic()
+```
+
+The shape of the good one is good because it sticks roughly in the same region (around 0) and it moves around a lot. The bad one is bad because it moves to lots of different places (from -20 to +20) and tends to stick around the same area for a while.
+
+**9E6.**
+
+I'll skip the sketch, but a good trank plot should show histograms that are roughly uniform and overlapping. A bad one will have chains that more frequently have ranks greater or smaller than others in different places.
+
+**9M1.**
+
+```{r}
+# Fit the model with a uniform distribution for sigma
+m9_1u <- ulam(
+    alist(
+        log_gdp_std ~ dnorm(mu, sigma),
+        mu <- a[cid] + b[cid] * (rugged_std - 0.215),
+        a[cid] ~ dnorm(1, 0.1),
+        b[cid] ~ dnorm(0, 0.3),
+        sigma ~ dunif(0, 1)
+    ),
+    data = dat_slim,
+    chains = 4,
+    cores = 4
+)
+
+pairs(m9_1u)
+
+precis(m9_1, depth = 2)
+precis(m9_1u, depth = 2)
+```
+
+Changing the prior on sigma doesn't seem to have much of an effect on the posterior for sigma. 
+
+**9M2.**
+
+```{r}
+m9_1e <- ulam(
+    alist(
+        log_gdp_std ~ dnorm(mu, sigma),
+        mu <- a[cid] + b[cid] * (rugged_std - 0.215),
+        a[cid] ~ dnorm(1, 0.1),
+        b[cid] ~ dexp(0.3),
+        sigma ~ dunif(0, 1)
+    ),
+    data = dat_slim,
+    chains = 4,
+    cores = 4
+)
+
+pairs(m9_1e)
+
+precis(m9_1, depth = 2)
+precis(m9_1e, depth = 2)
+```
+
+Changing the prior on `b[cid]` changes the posterior distribution for `b[2]` dramatically. The remaining parameters have roughly the same shape as the original model, though `b[1]` shifts a little to the right. `b[2]` was reliably negative in the original model, but putting a prior that is positive on it makes it very close to zero. 
+
+**9M3.**
+
+We'll use the rugged example for this problem.
+
+```{r}
+warmup <- c(100, 200, 500)
+mdls <- list(length(warmup))
+for (i in seq_along(warmup))
+{
+  mdls[[i]] <- ulam(
+    alist(
+        log_gdp_std ~ dnorm(mu, sigma),
+        mu <- a[cid] + b[cid] * (rugged_std - 0.215),
+        a[cid] ~ dnorm(1, 0.1),
+        b[cid] ~ dexp(0.3),
+        sigma ~ dunif(0, 1)
+    ),
+    data = dat_slim,
+    warmup = warmup[[i]]
+   )
+}
+
+lapply(mdls, precis, depth = 2)
+```
+
+Using three different values of `warmup` didn't really produce any differences in the summary statistics of the posterior. All of the options have `Rhat4 = 1` and all have relatively large `n_eff` values for some of the parameters. The `warmup = 200` case has the best `n_eff` values for all parameters except `sigma`. 
+
+Let's examine each fits' traceplots.
+
+```{r}
+lapply(mdls, traceplot)
+```
+
+All the plots have good traces. It seems that 100 warmup samples in this case is enough, but using 200 would produce better `n_eff` values.
