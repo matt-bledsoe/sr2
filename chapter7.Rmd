@@ -1,0 +1,203 @@
+---
+title: Chapter 7 Problems and Notes
+output: html_document
+---
+
+```{r setup}
+library(rethinking)
+library(tidyverse)
+```
+
+# Practice
+
+**7E1.**
+
+The three motivating criteria that define information entropy are:
+
+1. Small changes in our probabilities for the same events should induce small changes in our measure of the uncertainty.
+2. The more spread out the probability distribution, the higher the uncertainty.
+3. The measure of uncertainty should be additive. 
+
+**7E2.**
+
+The entropy of the coin is `r -(0.7 * log(0.7) + 0.3 * log(0.3))`.
+
+**7E3.**
+
+The entropy of the die is 
+
+```{r}
+p <- c(0.2, 0.25, 0.25, 0.3)
+-sum(p * log(p))
+```
+
+**7E4.**
+
+The entropy of the die is 
+
+```{r}
+p <- c(1, 1, 1, 0) / 3
+-sum(p * log(p))
+```
+
+**7M1.**
+
+The defintion of AIC is 
+
+$$AIC = D_{\text{train}} + 2p = -2\text{lppd} + 2k$$
+
+where $k$ is the number of free parameters in the posterior.
+
+The definition of WAIC is
+
+$$WAIC(y, \Theta) = -2\biggr(\text{lppd} - \sum_i \text{var}_\theta\log p(y_i | \theta)\biggr)$$
+
+The WAIC is more general than AIC as the AIC is valid under the following three conditions: (1) flat priors, (2) the posterior is multivariate normal, and (3) the sample size $N$ is much greater than the number of parameters $k$. If these criteria held, then WAIC would transform into AIC.
+
+**7M2.**
+
+The difference betwen model _selection_ and model _comparison_ is that the former takes a collection of models and selects one based on minmizing some statistic, say WAIC or PSIS, while the latter keeps all the candidate models and uses differences between them and their associated statisitcs to understand relative model accuracy among the various models. When we select one model, we lose information about the relative model accurcaty, which can provide advice about how confident we might be about models in the context of our research problem and avaialable data.
+
+**7M3.**
+
+To answer this and the next question, I will use the divorce model(s) from the book. So, first we will fit model 5.1.
+
+```{r}
+data(WaffleDivorce, package = "rethinking")
+wd <- WaffleDivorce |>
+  mutate(age = standardize(MedianAgeMarriage),
+         divorce = standardize(Divorce),
+         marriage = standardize(Marriage))
+
+m5_1 <- quap(
+    alist(
+        divorce ~ dnorm(mu, sigma),
+        mu <- a + b_age * age,
+        a ~ dnorm(0, 0.2),
+        b_age ~ dnorm(0, 0.5),
+        sigma ~ dexp(1)
+    ),
+    data = wd
+)
+```
+
+When comparing models with information criteria, the models must be fit exactly to the same observations because the values of the information criteria are defined pointwise. So, if comparing information criteria for two models that are fit to different data, there differences could be due to the differences in the samples. Similarly, if the _number_ of data points is different, the value of the information criterion from the model will be larger because it has more errors to add up.
+
+In order to demonstrate this, I will fit a few more versions of `m5_1` on different subsets of the original data.
+
+```{r}
+# Define subsets of the data that use the first 20%, 40%, 60%, and 80% of the
+# observations
+pct <- c(0.2, 0.4, 0.6, 0.8)
+wd_subsets <- lapply(pct,
+  function(x){
+    # Find the row number that represents (roughly) the percentage of the total
+    # number of rows
+    n <- as.integer(x * nrow(wd))
+    # Subset the data
+    return(wd[1:n, ])
+  })
+
+# Now fit the same model as m5_1 to each of the datasets
+mdl5 <- lapply(wd_subsets,
+  function(d) {
+    quap(
+      alist(
+        divorce ~ dnorm(mu, sigma),
+        mu <- a + b_age * age,
+        a ~ dnorm(0, 0.2),
+        b_age ~ dnorm(0, 0.5),
+        sigma ~ dexp(1)
+      ),
+      data = d
+    )
+})
+
+# Add the original model to the mdl5 list and make names
+mdl5[[5]] <- m5_1
+names(mdl5) <- paste("m5", c(pct, 1), sep = "_")
+```
+
+The `compare` function from the rethinking package will not allow us to compare models fit to different numbers of data, so we will just use the `WAIC` function applied to each model individually to compare.
+
+```{r}
+lapply(mdl5, WAIC)
+```
+
+As expected, the WAIC value increases with the number of data points in the sample. Comparing these models would make you think the one with the least number of data points is best, but that would be wrong.
+
+**7M4.**
+
+For this problem, we will use a procedure similar to the one in **7M3**. Instead of varying the number of data points, we will vary the width of the prior on `b_age`. I expect that the penalty term of the WAIC will increase as the width of the prior increases. 
+
+```{r}
+# Define some widths for the b_age prior
+width <- c(0.1, 0.5, 1, 5, 10)
+
+# Fit the models for each width (the second one will be identical to the 
+# original model). I could not get lapply or a for loop to work correctly, so
+# I am defining each model by hand.
+mdl5w <- list(length(width))
+mdl5w[[1]] <- quap(
+  alist(
+    divorce ~ dnorm(mu, sigma),
+    mu <- a + b_age * age,
+    a ~ dnorm(0, 0.2),
+    b_age ~ dnorm(0, 0.1),
+    sigma ~ dexp(1)
+  ),
+  data = wd
+)
+mdl5w[[2]] <- quap(
+  alist(
+    divorce ~ dnorm(mu, sigma),
+    mu <- a + b_age * age,
+    a ~ dnorm(0, 0.2),
+    b_age ~ dnorm(0, 0.5),
+    sigma ~ dexp(1)
+  ),
+  data = wd
+)
+mdl5w[[3]] <- quap(
+  alist(
+    divorce ~ dnorm(mu, sigma),
+    mu <- a + b_age * age,
+    a ~ dnorm(0, 0.2),
+    b_age ~ dnorm(0, 1),
+    sigma ~ dexp(1)
+  ),
+  data = wd
+)
+mdl5w[[4]] <- quap(
+  alist(
+    divorce ~ dnorm(mu, sigma),
+    mu <- a + b_age * age,
+    a ~ dnorm(0, 0.2),
+    b_age ~ dnorm(0, 5),
+    sigma ~ dexp(1)
+  ),
+  data = wd
+)
+mdl5w[[5]] <- quap(
+  alist(
+    divorce ~ dnorm(mu, sigma),
+    mu <- a + b_age * age,
+    a ~ dnorm(0, 0.2),
+    b_age ~ dnorm(0, 10),
+    sigma ~ dexp(1)
+  ),
+  data = wd
+)
+names(mdl5w) <- paste("mdl5w", width, sep = "_")
+
+# Compare the WAIC
+compare(mdl5w[[1]], mdl5w[[2]], mdl5w[[3]], mdl5w[[4]], mdl5w[[5]])
+```
+
+**7M5.**
+
+Informative priors reduce overfitting because they limit the influence of values in the data that are significantly outside the expectations of the priors. In other words, they limit the flexibility of the estimator to accommodate unusual data points.
+
+**7M6.**
+
+Informative priors that are too restrictive can lead to underfitting if they don't give enough weight to regular patterns in the data. At the extreme, priors that are certain about parameter values (maximally informative?) can learn nothing from the data.
