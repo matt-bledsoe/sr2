@@ -1,0 +1,268 @@
+---
+title: Solutions for Statistical Rethinking 2023 Homework Week 04
+output: html_document
+--- 
+[Link to problem sheet](https://github.com/rmcelreath/stat_rethinking_2023/blob/main/homework/week04.pdf) 
+
+```{r setup, echo=FALSE, message=FALSE}
+library(rethinking)
+library(dagitty)
+library(tidyverse)
+```
+
+> 1. Revisit the marriage, age, and happiness collider bias example from Chapter 6. Run models `m6.9` and `m6.10` again (pages 178-179). Compare these two models with both PSIS and WAIC. Which model is expected to make better predictions, according to these criteria, and which model yields the correct causal inference?
+
+```{r}
+# Create the dataset
+d <- sim_happiness(seed = 1977, N_years = 1000)
+d2 <- d[d$age > 17, ]
+d2$A <- (d2$age - 18) / (65 - 18)
+d2$mid <- d2$married + 1
+
+# Fit the models
+m6.9 <- quap(
+    alist(
+        happiness ~ dnorm(mu, sigma),
+        mu <- a[mid] + bA * A,
+        a[mid] ~ dnorm(0, 1),
+        bA ~ dnorm(0, 2),
+        sigma ~ dexp(1)
+    ),
+    data = d2
+)
+m6.10 <- quap(
+    alist(
+        happiness ~ dnorm(mu, sigma),
+        mu <- a + bA * A,
+        a ~ dnorm(0, 1),
+        bA ~ dnorm(0, 2),
+        sigma ~ dexp(1)
+    ),
+    data = d2
+)
+
+# Compare
+compare(m6.9, m6.10)
+compare(m6.9, m6.10, func = PSIS)
+```
+
+Model `m6.9` is expected to predict the best according to both PSIS and WAIC, but model `m6.10` will give the correct causal inference.
+
+> 2. Reconsider the urban fox analysis from last week's homework. On the basis of PSIS and WAIC scores, which combination of variables best predicts body weight ($W$, `weight`)? What causal interpretation can you assign each coefficient (parameter) from the best scoring model?
+
+```{r}
+# load the data and define variables
+data(foxes)
+d <- foxes |>
+  mutate(W = standardize(weight),
+         A = standardize(area),
+         F = standardize(avgfood),
+         G = standardize(groupsize))
+
+# Build models with different combinations of predictors
+m_A <- quap(
+    alist(
+        W ~ dnorm(mu, sigma),
+        mu <- a + bA * A,
+        a ~ dnorm(0, 0.2),
+        bA ~ dnorm(0, 0.5),
+        sigma ~ dexp(1)
+    ),
+    data = d
+)
+
+m_F <- quap(
+    alist(
+        W ~ dnorm(mu, sigma),
+        mu <- a + bF * F,
+        a ~ dnorm(0, 0.2),
+        bF ~ dnorm(0, 0.5),
+        sigma ~ dexp(1)
+    ),
+    data = d
+)
+
+m_G <- quap(
+    alist(
+        W ~ dnorm(mu, sigma),
+        mu <- a + bG * G,
+        a ~ dnorm(0, 0.2),
+        bG ~ dnorm(0, 0.5),
+        sigma ~ dexp(1)
+    ),
+    data = d
+)
+
+m_AF <- quap(
+    alist(
+        W ~ dnorm(mu, sigma),
+        mu <- a + bA * A + bF * F,
+        a ~ dnorm(0, 0.2),
+        bA ~ dnorm(0, 0.5),
+        bF ~ dnorm(0, 0.5),
+        sigma ~ dexp(1)
+    ),
+    data = d
+)
+
+m_AG <- quap(
+    alist(
+        W ~ dnorm(mu, sigma),
+        mu <- a + bA * A + bG * G,
+        a ~ dnorm(0, 0.2),
+        bA ~ dnorm(0, 0.5),
+        bG ~ dnorm(0, 0.5),
+        sigma ~ dexp(1)
+    ),
+    data = d
+)
+
+m_FG <- quap(
+    alist(
+        W ~ dnorm(mu, sigma),
+        mu <- a + bF * F + bG * G,
+        a ~ dnorm(0, 0.2),
+        bF ~ dnorm(0, 0.5),
+        bG ~ dnorm(0, 0.5),
+        sigma ~ dexp(1)
+    ),
+    data = d
+)
+
+m_AFG <- quap(
+    alist(
+        W ~ dnorm(mu, sigma),
+        mu <- a + bA * A + bF * F + bG * G,
+        a ~ dnorm(0, 0.2),
+        bA ~ dnorm(0, 0.5),
+        bF ~ dnorm(0, 0.5),
+        bG ~ dnorm(0, 0.5),
+        sigma ~ dexp(1)
+    ),
+    data = d
+)
+
+compare(m_A, m_F, m_G, m_AF, m_AG, m_FG, m_AFG)
+compare(m_A, m_F, m_G, m_AF, m_AG, m_FG, m_AFG, func = PSIS)
+```
+
+According to WAIC, the model with all three predictors $A$, $F$, and $G$ is expected to predict the best. According to PSIS, the model with just $F$ and $G$ as predicts is expected to predict the best. However, this model is second best according to WAIC and the three-predictor model is second best according to PSIS. 
+
+In the two predictor model ($F$ and $G$), the coefficient on $F$ gives the direct influence of $F$ on $W$ and similarly with $G$. The $F$ coefficient does not include the effect of going through $G$. 
+
+In the three predictor model ($A$, $F$, and $G$), the coefficient on $A$ cannot be interpreted causally because its influence on weight is confounded by conditioning on $F$ (it's a pipe). I am not sure how the coefficients of $F$ and $G$ ought to be interpreted in this situation.
+
+> 3. Build a predictive model of the relationship on the cover of the book, the relationship between the timing of cherry blossoms and March temperature in the same year. The data are found in `data(cherry_blossoms)`. Consider at least two different models (functional relationships) to predict `doy` with `temp`. You could, for example, compare a linear model with a quadratic model. Compare them with PSIS or WAIC. 
+>
+> Suppose March temperatures reach 9 degrees by the year 2050. What does your best model predict for the predictive distribution of the day-in-year that the cherry blossomes will bloom?
+
+```{r}
+data(cherry_blossoms)
+d <- cherry_blossoms |>
+  mutate(d = standardize(doy),
+         t = standardize(temp)) |>
+  drop_na(d, t)
+
+# Build a linear model
+m3_1 <- quap(
+    alist(
+        d ~ dnorm(mu, sigma),
+        mu <- a + b1 * t,
+        a ~ dnorm(0, 0.2),
+        b1 ~ dnorm(0, 0.5),
+        sigma ~ dexp(1)
+    ),
+    data = d
+)
+
+precis(m3_1)
+
+# Build a quadratic model
+m3_2 <- quap(
+    alist(
+        d ~ dnorm(mu, sigma),
+        mu <- a + b1 * t + b2 * t^2,
+        a ~ dnorm(0, 0.2),
+        b1 ~ dnorm(0, 0.5),
+        b2 ~ dnorm(0, 0.5),
+        sigma ~ dexp(1)
+    ),
+    data = d
+)
+
+precis(m3_2)
+
+compare(m3_1, m3_2)
+```
+
+The best predicting model according to WAIC is the linear model. Let's see how well it does extrapolating to values outside those of the sample.
+
+```{r}
+s <- sim(m3_1, data = data.frame(t = (9 - mean(d$temp)) / sd(d$temp)))
+colnames(s) <- c("std")
+s |>
+  as_tibble() |>
+  mutate(pred_doy = sd(d$doy) * (std + mean(d$doy))) |>
+  ggplot() +
+  geom_density(aes(x = pred_doy), color = "red")
+```
+
+The model predicts nonsense for a March temperature of 9. The range of predicted values isn't even less than 365: it's between 630 and 665. 
+
+> 4. **OPTIONAL CHALLENGE**. The data in `data(Dinosaurs)` are body mass estimates at different estimated ages for six different dinosaur species. See `?Dinosaurs` for more details. Choose one or more of these species (at least one, but as many as you like) and model its growth. To be precise: Make a predictive model of body mass using age as a predictor. Consider two or more model types for the function relating age to body mass and score each using PSIS and WAIC. 
+> 
+> Which model do you think is best, on predictive grounds? On scientific grounds? If your answers to these questions differ, why?
+
+```{r}
+data(Dinosaurs)
+
+# Plot the data for fun
+Dinosaurs |>
+  ggplot(aes(x = age, y = mass, color = species)) + 
+  geom_point() +
+  theme_classic() +
+  facet_wrap(~ species, scales = "free_y")
+
+# How many data points per species?
+count(Dinosaurs, species, sp_id)
+```
+
+I will start with the "Mossospondylus cainatus" species because it has the most data available at a whopping 9 data points. I will consider a linear and a quadratic model.
+
+```{r}
+d <- Dinosaurs |>
+  filter(sp_id == 3) |>
+  mutate(A = standardize(age),
+         M = standardize(mass))
+
+m4_1 <- quap(
+    alist(
+        M ~ dnorm(mu, sigma),
+        mu <- a + bA * A,
+        a ~ dnorm(0, 0.2),
+        bA ~ dnorm(0, 0.5),
+        sigma ~ dexp(1)
+    ),
+    data = d
+)
+
+precis(m4_1)
+
+m4_2 <- quap(
+    alist(
+        M ~ dnorm(mu, sigma),
+        mu <- a + bA * A + bA2 * A^2,
+        a ~ dnorm(0, 0.2),
+        bA ~ dnorm(0, 0.5),
+        bA2 ~ dnorm(0, 0.5),
+        sigma ~ dexp(1)
+    ),
+    data = d
+)
+
+precis(m4_2)
+
+PSIS(m4_2, pointwise = TRUE)
+PSIS(m4_1, pointwise = TRUE)
+# compare(m4_1, m4_2, func = PSIS, pointwise = TRUE)
+```
