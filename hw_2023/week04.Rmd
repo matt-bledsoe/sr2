@@ -150,7 +150,7 @@ According to WAIC, the model with all three predictors $A$, $F$, and $G$ is expe
 
 In the two predictor model ($F$ and $G$), the coefficient on $F$ gives the direct influence of $F$ on $W$ and similarly with $G$. The $F$ coefficient does not include the effect of going through $G$. 
 
-In the three predictor model ($A$, $F$, and $G$), the coefficient on $A$ cannot be interpreted causally because its influence on weight is confounded by conditioning on $F$ (it's a pipe). I am not sure how the coefficients of $F$ and $G$ ought to be interpreted in this situation.
+In the three predictor model ($A$, $F$, and $G$), the coefficient on $A$ cannot be interpreted causally because its influence on weight is confounded by conditioning on $F$ (it's a pipe). The coefficient of $F$ does estimate the direct effect of $F$ on $W$, but its accuracy is attenuated by the presence of $A$ in the model. The coefficient of $G$ estimates the direct effect of $G$ on $W$. 
 
 > 3. Build a predictive model of the relationship on the cover of the book, the relationship between the timing of cherry blossoms and March temperature in the same year. The data are found in `data(cherry_blossoms)`. Consider at least two different models (functional relationships) to predict `doy` with `temp`. You could, for example, compare a linear model with a quadratic model. Compare them with PSIS or WAIC. 
 >
@@ -202,12 +202,14 @@ s <- sim(m3_1, data = data.frame(t = (9 - mean(d$temp)) / sd(d$temp)))
 colnames(s) <- c("std")
 s |>
   as_tibble() |>
-  mutate(pred_doy = sd(d$doy) * (std + mean(d$doy))) |>
+  mutate(pred_doy = sd(d$doy) * std + mean(d$doy)) |>
   ggplot() +
-  geom_density(aes(x = pred_doy), color = "red")
+  geom_density(aes(x = pred_doy, color = "Predicted for 9 degrees")) +
+  geom_density(data = d, aes(x = doy, color = "Actual")) +
+  scale_color_manual(values = c("Actual" = "black", "Predicted for 9 degrees" = "red"))
 ```
 
-The model predicts nonsense for a March temperature of 9. The range of predicted values isn't even less than 365: it's between 630 and 665. 
+The model predicts for 9 degrees March temperature an earlier bloom date than the historical distribution. This makes sense as 9 degrees is warmer than any data in the sample, but that begs the question of how accurate this linear extrapolation is. 
 
 > 4. **OPTIONAL CHALLENGE**. The data in `data(Dinosaurs)` are body mass estimates at different estimated ages for six different dinosaur species. See `?Dinosaurs` for more details. Choose one or more of these species (at least one, but as many as you like) and model its growth. To be precise: Make a predictive model of body mass using age as a predictor. Consider two or more model types for the function relating age to body mass and score each using PSIS and WAIC. 
 > 
