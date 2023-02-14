@@ -1,0 +1,6 @@
+---
+title: Chapter 8 Problems and Notes
+output: html_document
+---
+
+McElreath skipped this chapter in the lectures for the 2023 version of this class. So, I skipped over it too.

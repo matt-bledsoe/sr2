@@ -1,0 +1,6 @@
+---
+title: Chapter 10 Problems and Notes
+output: html_document
+---
+
+There are no problems in Chapter 10, and I did not record any notes here.
