@@ -1,0 +1,56 @@
+---
+title: Solutions for Statistical Rethinking 2023 Homework Week 05
+output: html_document
+--- 
+[Link to problem sheet](https://github.com/rmcelreath/stat_rethinking_2023/blob/main/homework/week05.pdf) 
+
+```{r setup, echo=FALSE, message=FALSE}
+library(rethinking)
+library(tidyverse)
+library(dagitty)
+```
+
+> 1. The data in `data(NWOGrants)` are outcomes for scientific funding applications for the Netherlands Organization for Scientific Research (NWO) for 2010-2012 (see van der Lee and Ellemers doi:10.1073/pnas.1510159112). These data have a structure similar to the UCBAdmit data discussed in Chapter 11 and in lecture. There are applications and each has an associated gender (of the lead researcher). But instead of departments, there are disciplines. Draw a DAG for this sample. Then use the backdoor criterion and a binomial GLM to estimate the TOTAL causal effect of gender on grant awards.
+
+```{r}
+# Load and inspect the data
+data(NWOGrants)
+str(NWOGrants)
+```
+
+Using only the variables in this dataset (so ignoring unobserved confounds!) a DAG could be the following. Gender $G$ affects awards $A$ and the discipline $D$: folks of certain genders may gravitate toward specific disciplines and not others (similar to the role of department in the `UCBAdmit` data), while the awarding of grants may be influenced by the researcher's gender. Furthermore, the discipline affects awards as the NWO may be more favorable to some disciplines over others.
+
+Here is a DAG that represents these relationships.
+
+```{r}
+g <- dagitty('dag{
+    G [pos = "-1, 0"]
+    D [pos = "0, -1"]
+    A [pos = "1, 0"]
+    G -> D
+    G -> A
+    D -> A
+    }')
+plot(g)
+```
+
+To get the _total_ causal effect, we only need a model that includes $G$ as there are no backdoor paths from $G$ to $A$ that need to be closed.
+
+```{r}
+# Create a dataset for modeling
+d <- NWOGrants |>
+  mutate(d = as.integer(discipline),
+         g = ifelse(gender == "m", 1L, 2L),
+         a = awards,
+         n = applications) |>
+  select(d, g, a, n)
+
+m1_1 <- ulam(
+    alist(
+        a ~ dbinom(n, p),
+        logit(p) <- a[g],
+        a[g] ~ dnorm(0, 1)
+    ),
+    data = d
+)
+```
