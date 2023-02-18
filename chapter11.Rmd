@@ -1,0 +1,351 @@
+---
+title: Chapter 11 Problems and Notes
+output: html_document
+---
+
+```{r setup}
+library(tidyverse)
+library(rethinking)
+```
+
+# Practice
+
+**11E1.**
+
+The log-odds of an event with probability 0.35 is `r log(0.35 / (1 - 0.35))`.
+
+**11E2.**
+
+The probability of an event with log-odds 3.2 is `r exp(3.2) / (1 + exp(3.2))`.
+
+**11E3.**
+
+The proportional change in the odds per unit of the variable whose coefficient is 1.7 is `r exp(1.7)`.
+
+**11E4.**
+
+Poisson regressions require an offset when observations represent counts that are collected over different lengths of time or space. The single parameter, $\lambda$, of the Poisson model can be interpreted as the average rate of events per unit time (I find it easier to think of time examples, so I'll use that language from now on). If your data mixes counts from different units of time, then the one parameter will not be estimated correctly. Suppose you manage a bank and want to know whether one branch is better at opening accounts than another. But the two branches use different IT systems, where branch A records the number of accounts opened each day, while branch B only records the number of accounts opened each (work) week. In such a case, you can fit one model with both sets of data by including an offset that is the logarithm of the frequency of recording: 1 for branch A and 5 (or less depending on which weeks are included) for branch B. 
+
+**11M1.**
+
+The likelihood changes between binomial data in aggregated and disaggregated forms because the latter records a sequence of 0/1 events and the former records sums of those 0/1 events. In aggregated, we have to account for the number of ways that a certain sum can appear in a sequence of 0/1 events. 
+
+**11M2.**
+
+If the coefficient of $x$ in a Poisson regression has value 1.7 that means the expected rate of events per unit time increases by a factor of $e^{1.7} =$ `r exp(1.7)` for every unit increase in $x$. 
+
+**11M3.**
+
+The parameter being estimated in a binomial model is the probability of "success". Thus, it's value is constrained to the $[0,1]$ interval. The values of the linear predictor can, in principle, range over the entire real line, hence we need a function that can translate a real number to the unit interval or vice versa. The logit function and its inverse accomplish this.
+
+**11M4.**
+
+The parameter being estimated in a Poisson model is the expected number of events per unit time and, hence, must be positive. The values of the linear predictor can take on any real value, so we need a function that maps between the real line and the positive real line. The logarithm function and its inverse do this.
+
+**11M5.**
+
+Using a logit link for the mean of a Poisson GLM would imply that the expected rate of events is 1 or fewer per unit time. That is, it would be for events that don't happen that often. So, maybe studying the rate of accidents per day on a given stretch of road. 
+
+**11M6.**
+
+The constraints for the binomial distribution are that it measures non-negative integer values with a fixed, known maximum $n$ that have a fixed mean $np$. The constraints for the Poisson distribution are that it measures non-negative integer without a known maximum and a fixed mean $\lambda$. The difference between the two is the upper bound of the range of the outcome values. 
+
+**11M7.**
+
+```{r}
+# Create the dataset
+data(chimpanzees)
+d <- chimpanzees |>
+  mutate(treatment = 1 + prosoc_left + 2 * condition) |>
+  select(pulled_left, actor, treatment) |>
+  mutate(treatment = as.integer(treatment))
+
+m11_4 <- ulam(
+    alist(
+        pulled_left ~ dbinom(1, p),
+        logit(p) <- a[actor] + b[treatment],
+        a[actor] ~ dnorm(0, 1.5),
+        b[treatment] ~ dnorm(0, 0.5)
+    ),
+    data = d,
+    chains = 4,
+    cores = 4
+)
+precis(m11_4, depth = 2)
+
+
+m11_4_quap <- quap(
+    alist(
+        pulled_left ~ dbinom(1, p),
+        logit(p) <- a[actor] + b[treatment],
+        a[actor] ~ dnorm(0, 1.5),
+        b[treatment] ~ dnorm(0, 0.5)
+    ),
+    data = d
+)
+precis(m11_4_quap, depth = 2)
+```
+
+The posterior means and standard deviations are all very similar between the two versions of the model. They don't look that different at all, but let's inspect the distributions graphically.
+
+```{r}
+post <- extract.samples(m11_4) |>
+  imap(\(x, i) {
+    if (i == "a") {
+     x <-  x |>
+        `colnames<-`(unique(d$actor)) |>
+        as_tibble() |>
+        pivot_longer(everything(), names_to = "actor", values_to = "post_a") 
+    } else {
+      x <- x |>
+        `colnames<-`(unique(d$treatment)) |>
+        as_tibble() |>
+        pivot_longer(everything(), names_to = "treatment",
+                     values_to = "post_b") 
+    }
+    return(x)
+  })
+post_quap <- extract.samples(m11_4_quap) |>
+  imap(\(x, i) {
+    if (i == "a") {
+     x <-  x |>
+        `colnames<-`(unique(d$actor)) |>
+        as_tibble() |>
+        pivot_longer(everything(), names_to = "actor", values_to = "post_a") 
+    } else {
+      x <- x |>
+        `colnames<-`(unique(d$treatment)) |>
+        as_tibble() |>
+        pivot_longer(everything(), names_to = "treatment",
+                     values_to = "post_b") 
+    }
+    return(x)
+  })
+
+cmb_post <- map2(post, post_quap, bind_rows, .id = "algo") |>
+  lapply(\(x) mutate(x, algo = ifelse(algo == "1", "ulam", "quap")))
+
+cmb_post$a |>
+  ggplot(aes(x = post_a, color = algo)) +
+  geom_density() +
+  facet_wrap(~actor) +
+  labs(x = "Posterior estimate of a", y = "Density") +
+  theme_classic()
+cmb_post$b |>
+  ggplot(aes(x = post_b, color = algo)) +
+  geom_density() +
+  facet_wrap(~treatment) +
+  labs(x = "Posterior estimate of b", y = "Density") +
+  theme_classic()
+```
+
+The only noticeable differences are in the `b` estimates, but this could just be the size of the charts. However, they still look nearly identical.
+
+Now, let's repeat all of that using Normal(0, 10) for the actor intercepts.
+
+```{r}
+m11_4 <- ulam(
+    alist(
+        pulled_left ~ dbinom(1, p),
+        logit(p) <- a[actor] + b[treatment],
+        a[actor] ~ dnorm(0, 10),
+        b[treatment] ~ dnorm(0, 0.5)
+    ),
+    data = d,
+    chains = 4,
+    cores = 4
+)
+precis(m11_4, depth = 2)
+
+
+m11_4_quap <- quap(
+    alist(
+        pulled_left ~ dbinom(1, p),
+        logit(p) <- a[actor] + b[treatment],
+        a[actor] ~ dnorm(0, 10),
+        b[treatment] ~ dnorm(0, 0.5)
+    ),
+    data = d
+)
+precis(m11_4_quap, depth = 2)
+```
+
+The biggest difference here is in the coefficient for actor 2. The MCMC posterior mean is much larger and has a larger standard deviation that the one estimated by quadratic approximation.  Let's look at the distributions to see if anything else stands out.
+
+```{r}
+post <- extract.samples(m11_4) |>
+  imap(\(x, i) {
+    if (i == "a") {
+     x <-  x |>
+        `colnames<-`(unique(d$actor)) |>
+        as_tibble() |>
+        pivot_longer(everything(), names_to = "actor", values_to = "post_a") 
+    } else {
+      x <- x |>
+        `colnames<-`(unique(d$treatment)) |>
+        as_tibble() |>
+        pivot_longer(everything(), names_to = "treatment",
+                     values_to = "post_b") 
+    }
+    return(x)
+  })
+post_quap <- extract.samples(m11_4_quap) |>
+  imap(\(x, i) {
+    if (i == "a") {
+     x <-  x |>
+        `colnames<-`(unique(d$actor)) |>
+        as_tibble() |>
+        pivot_longer(everything(), names_to = "actor", values_to = "post_a") 
+    } else {
+      x <- x |>
+        `colnames<-`(unique(d$treatment)) |>
+        as_tibble() |>
+        pivot_longer(everything(), names_to = "treatment",
+                     values_to = "post_b") 
+    }
+    return(x)
+  })
+
+cmb_post <- map2(post, post_quap, bind_rows, .id = "algo") |>
+  lapply(\(x) mutate(x, algo = ifelse(algo == "1", "ulam", "quap")))
+
+cmb_post$a |>
+  ggplot(aes(x = post_a, color = algo)) +
+  geom_density() +
+  facet_wrap(~actor, scales = "free") +
+  labs(x = "Posterior estimate of a", y = "Density") +
+  theme_classic()
+cmb_post$b |>
+  ggplot(aes(x = post_b, color = algo)) +
+  geom_density() +
+  facet_wrap(~treatment) +
+  labs(x = "Posterior estimate of b", y = "Density") +
+  theme_classic()
+```
+
+Still looks like actor 2's distribution is the only one that stands out.
+
+**11M8.**
+
+```{r}
+data(Kline)
+d <- Kline |>
+  mutate(log_pop = scale(log(population)),
+         contact_id = ifelse(contact == "high", 2L, 1L)) |>
+  select(t = total_tools, log_pop, pop = population, cid = contact_id)
+
+# Drop Hawaii
+d2 <- Kline |>
+  filter(culture != "Hawaii") |>
+  mutate(log_pop = scale(log(population)),
+         contact_id = ifelse(contact == "high", 2L, 1L)) |>
+  select(t = total_tools, log_pop, pop = population, cid = contact_id)
+
+# Fit the three models from the book
+m11_9 <- ulam(
+    alist(
+      t ~ dpois(lambda),
+      log(lambda) <- a,
+      a ~ dnorm(3, 0.5)
+    ),
+    data = d,
+    log_lik = TRUE
+)
+m11_10 <- ulam(
+    alist(
+      t ~ dpois(lambda),
+      log(lambda) <- a[cid] + b[cid] * log_pop,
+      a[cid] ~ dnorm(3, 0.5),
+      b[cid] ~ dnorm(0, 0.2)
+    ),
+    data = d,
+    log_lik = TRUE
+)
+m11_11 <- ulam(
+    alist(
+      t ~ dpois(lambda),
+      lambda <- exp(a[cid]) * pop^b[cid] / g,
+      a[cid] ~ dnorm(1, 1),
+      b[cid] ~ dexp(1),
+      g ~ dexp(1)
+    ),
+    data = d,
+    log_lik = TRUE
+)
+
+# Fit the three models from the book without Hawaii
+m11_9_nohi <- ulam(
+    alist(
+      t ~ dpois(lambda),
+      log(lambda) <- a,
+      a ~ dnorm(3, 0.5)
+    ),
+    data = d2,
+    log_lik = TRUE
+)
+m11_10_nohi <- ulam(
+    alist(
+      t ~ dpois(lambda),
+      log(lambda) <- a[cid] + b[cid] * log_pop,
+      a[cid] ~ dnorm(3, 0.5),
+      b[cid] ~ dnorm(0, 0.2)
+    ),
+    data = d2,
+    log_lik = TRUE
+)
+m11_11_nohi <- ulam(
+    alist(
+      t ~ dpois(lambda),
+      lambda <- exp(a[cid]) * pop^b[cid] / g,
+      a[cid] ~ dnorm(1, 1),
+      b[cid] ~ dexp(1),
+      g ~ dexp(1)
+    ),
+    data = d2,
+    log_lik = TRUE
+)
+```
+
+```{r}
+list(m11_9, m11_9_nohi, m11_10, m11_10_nohi, m11_11, m11_11_nohi) |>
+  lapply(precis, depth = 2)
+
+log_pop_seq <- seq(from = -5, to = 3, length.out = 100)
+pop_seq <- exp(log_pop_seq * sd(d2$log_pop) + mean(d2$log_pop))
+
+pred_10 <- list(
+  link(m11_10_nohi, data = data.frame(log_pop = log_pop_seq, cid = 1)),
+  link(m11_10_nohi, data = data.frame(log_pop = log_pop_seq, cid = 2))
+) |>
+  lapply(\(x) {
+    x |>
+        `colnames<-`(1:100) |>
+        as_tibble() |>
+        pivot_longer(everything(), names_to = "obs_id") |>
+        mutate(obs_id = as.integer(obs_id),
+                log_pop = log_pop_seq[obs_id],
+                pop = pop_seq[obs_id]) |>
+        group_by(pop, log_pop) |>
+        summarize(mean = mean(value),
+                    lower = PI(value)[[1]],
+                    upper = PI(value)[[2]]) |>
+        ungroup()
+  }) |>
+  bind_rows(.id = "cid")
+
+pred_10 |>
+  ggplot(aes(x = log_pop, color = cid, fill = cid)) +
+  geom_line(aes(y = mean)) +
+  geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.3) +
+  geom_point(data = mutate(d2, cid = as.character(cid)),
+             aes(x = log_pop, y = t, color = cid))
+
+
+pred_10 |>
+  ggplot(aes(x = pop, color = cid, fill = cid)) +
+  geom_line(aes(y = mean)) +
+  geom_ribbon(aes(ymin = lower, ymax = upper), alpha = 0.3) +
+  geom_point(data = mutate(d2, cid = as.character(cid)),
+             aes(x = pop, y = t, color = cid))
+
+```
