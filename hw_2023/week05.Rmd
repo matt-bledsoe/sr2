@@ -45,12 +45,137 @@ d <- NWOGrants |>
          n = applications) |>
   select(d, g, a, n)
 
+# Create a lookup for the names of the disciplines
+discipline_lkup <- fct_unique(NWOGrants$discipline)
+
 m1_1 <- ulam(
     alist(
         a ~ dbinom(n, p),
-        logit(p) <- a[g],
-        a[g] ~ dnorm(0, 1)
+        logit(p) <- b[g],
+        b[g] ~ dnorm(0, 1)
     ),
     data = d
 )
+
+precis(m1_1, depth = 2)
+
+# Convert posterior to probability scale and compute contrast between genders
+mu <- inv_logit(extract.samples(m1_1)[[1]]) |>
+  `colnames<-`(c("b1", "b2")) |>
+  as_tibble() |>
+  mutate(diff = b1 - b2)
+
+precis(mu)
+```
+
+According to these data and this model, Gender 1 (males) enjoy a slightly greater probability of award (between 1% and 5%, with a mean around 3%).
+
+> 2. Now estimate the DIRECT causal effect of gender on grant awards. Use the same DAG as above to justify one or more binomial models. Compute the average direct effect of gender, weighting each discipline in proportion to the number of applications in the sample. Refer to the marginal effect example in Lecture 9 for help.
+
+According to my DAG above, to estimate the direct effect of gender I need to close the pipe through discipline. Therefore, we need to stratify by $D$ in a new binomial model.
+
+```{r}
+m2_1 <- ulam(
+    alist(
+        a ~ dbinom(n, p),
+        logit(p) <- b[g, d],
+        matrix[g, d]:b ~ normal(0, 1)
+    ),
+    data = d
+)
+
+precis(m2_1, depth = 3)
+
+postcheck(m2_1)
+
+post <- extract.samples(m2_1)$b
+post_p <- inv_logit(post)
+contr_discipline <- sapply(1:9, \(i) post_p[, 1, i] - post_p[, 2, i]) |>
+  `colnames<-`(discipline_lkup) |>
+  as_tibble() |>
+  pivot_longer(everything(), names_to = "discipline",
+               values_to = "gender_contrast")
+# Plot contrasts by discipline
+contr_discipline |>
+  ggplot(aes(x = gender_contrast, color = discipline)) +
+  geom_density(key_glyph = "abline") +
+  theme_classic() +
+  labs(x = "Gender contrast (probability)", y = "Density",
+       color = "Discipline") +
+  geom_vline(xintercept = 0, linetype = 2) +
+  annotate("text", x = c(-0.1, 0.09), y = c(16.5, 16.5),
+           label = c("Women favored", "Men favored"))
+```
+
+After stratifying by discipline, we can see that the certain disciplines appear to favor men in their grant awards (Earth/life sciences, Medical sciences, and Social sciences); some appear to favor women (Humanities, Interdisciplinary, Physical sciences, and Technical sciences); and, a couple (Physics, Chemical sciences) are somewhat neutral. Note that the two neutral disciplines have a very wide contrast distribution, so maybe it's more appropriate to say that the model can't tell the difference of award rates between the genders.
+
+Now, we can compute the average direct causal effect of gender.
+```{r}
+n_applications <- sum(d$n)
+n_apps_dept <- d |>
+  group_by(d) |>
+  summarize(n = sum(n))
+new_d <- bind_rows(n_apps_dept, n_apps_dept, .id = "g") |>
+  mutate(g = as.integer(g))
+
+s1 <- link(m2_1, data = new_d[new_d$g == 1, ])
+s2 <- link(m2_1, data = new_d[new_d$g == 2, ])
+sim_contrast <- s1 - s2
+
+dens(sim_contrast, lwd = 4, col = 2, xlab = "Effect of gender")
+abline(v = 0, lty = 2)
+text(x = c(-0.1, 0.1), y = c(4.4, 4.4),
+     labels = c("Women favored", "Men favored"),
+     col = "black",
+     xpd = TRUE)
+```
+
+The average affect over all departments appears to be fairly even between the genders if not slightly (mean = `r mean(sim_contrast)`) in favor of women.
+
+> 3. Considering the total effect (problem 1) and direct effect (problem 2) of gender, what causes contribute to the average difference between men and women in award rate in this sample? It is not necessary to say whether there is evidence of discrimination or the presence or absence of unobserved confounds (which are likely!). Simply explain how the direct effects you have estimate make sense (or not) of the total effect.
+
+The average difference between men's and women's award rates in this sample is due to the differences in application rates between the two genders across the nine disciplines. Disciplines that awarded a higher percentage of grants to men also had the most parity of applications between genders. While the disciplines that had the most applications by males, had much higher relative award rates going to women. 
+
+> 4. OPTIONAL CHALLENGE. The data in `data(UFCLefties)` are the outcomes of 205 Ultimate Fighting Championship (UFC) matches (see `?UFCLefties` for details). It is widely believed that left-handed fighters (aka "Southpaws") have an advantage over right-handed fighters, and left-handed men are indeed over-represented among fighters (and fencers and tennis players) compared to the general population. Estimate the average advantage, if any, that a left-handed fighter has against right-handed fighters. Based upon your estimate, why do you think left-handers are over-represented among UFC fighters?
+
+```{r}
+data(UFClefties)
+
+dat <- UFClefties |>
+  mutate(win1 = fighter1.win,
+         # 2 for fighter 1 is left only, 3 for fighter 2 is lefty only, 4 for
+         # both, 1 for neither 
+         lefty = 1 + fighter1.lefty + 2 * fighter2.lefty) |>
+  select(win1, lefty)
+
+m4_1 <- ulam(
+    alist(
+        win1 ~ dbinom(1, p),
+        logit(p) <- a[lefty],
+        a[lefty] ~ normal(0, 1)
+    ),
+    data = dat,
+    chains = 4,
+    cores = 4
+)
+
+# Diagnostic
+traceplot(m4_1)
+trankplot(m4_1)
+
+precis(m4_1, depth = 2)
+
+post <- inv_logit(extract.samples(m4_1)$a)
+post_p <- post |>
+  `colnames<-`(c("both_right", "left_1", "left_2", "both_left")) |>
+  as_tibble()
+
+post_p |>
+  pivot_longer(everything(), names_to = "handed", values_to = "p") |>
+  ggplot(aes(x = p, color = handed)) +
+  geom_density(key_glyph = "abline") +
+  labs(x = "Posterior probability of fighter 1 winning", y = "Density",
+       color = "Handedness of fighters") +
+  theme_classic() +
+  geom_vline(xintercept = 0.5, linetype = 2)
 ```
