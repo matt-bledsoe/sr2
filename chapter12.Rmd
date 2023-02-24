@@ -1,0 +1,65 @@
+---
+title: Chapter 12 Problems and Notes
+output: html_document
+---
+
+```{r setup, message = FALSE, warning = FALSE}
+library(tidyverse)
+library(rethinking)
+```
+
+# Practice
+
+**12E1.**
+
+An categorical variable is a variable that has a distinct set of non-metric values, such as a variable representing a certain set of species (dog, cat, parakeet). An ordered categorical variable is a categorical variable whose values have an intrinsic ordering, such as the credit rating of a bond (Aaa, Aa, ..., C).
+
+**12E2.**
+
+The link function for an ordered categorical variable is the _cumulative logit_. The functional form is identical to the usual logit link, but the inputs are cumulative probabilities rather than just probabilities.
+
+**12E3.**
+
+When data are zero-inflated but a model does not take that into account, one would infer the wrong value of the parameter of the model (say, $\lambda$ in a "pure" Poisson model).
+
+**12E4.**
+
+
+
+**12M1.**
+
+```{r}
+ratings <- c(12, 36, 7, 41)
+(cum_rate <- cumsum(ratings) / sum(ratings))
+(cum_logodds <- log(cum_rate / (1 - cum_rate)))
+```
+
+**12M2.**
+
+```{r}
+# Use data from problem 12M1
+dat <- tibble(rating = (1:4), freq = ratings, cum_rate = cum_rate) |>
+  mutate(lag_cum_rate = lag(cum_rate, default = 0))
+dat |>
+  ggplot(aes(x = rating, y = cum_rate)) +
+  geom_col(width = 0.02, color = "gray", alpha = 0.3) +
+  geom_segment(aes(y = lag_cum_rate, xend = rating, yend = cum_rate),
+               color = "blue", linewidth = 1) +
+  geom_line() +
+  geom_point(shape = 21, size = 2, fill = "black", color = "white",
+             stroke = 3) +
+  annotate("text", x = 1:4 + 0.05, y = cum_rate * 0.95, label = 1:4,
+           color = "blue") +
+  labs(x = "Rating", y = "Cumulative proportion") +
+  theme_classic()
+```
+
+**12M3.**
+
+Let $q$ be the probability of observing a 0 from the "other" cause (drinking in the monk example), and let $n$ and $p$ be the paramters of the pure binomial process. Then, we have probability that the outcome is 0.
+
+$$\text{Pr}(0|q, n, p) = q + (1-q)(1-p)^n$$
+
+The first term is just the probability of getting a zero from the other cause, while the second term is the probability of getting a zero from the binomial process $(1-p)^n$ times the probability that the zero arises _not_ from the other cause $(1-q)$. Similarly, the probability of values greater than zero is.
+
+$$\text{Pr}(y = k|k > 0, q, n, p) = (1-q)\binom{n}{k}p^k(1-p)^{n-k}$$
