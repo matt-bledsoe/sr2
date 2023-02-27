@@ -24,7 +24,9 @@ When data are zero-inflated but a model does not take that into account, one wou
 
 **12E4.**
 
+According to some data I've seen, it looks like births per day could be under-dispersed. The numbers ranged from about 13,000 down to 6,000 for a given date (Christmas day was at the bottom). The vast majority of dates seemed to have a relatively high count, say > 10,000. This would suggest a mean around that much or even a bit higher, but the variance could not be nearly that large. 
 
+The frequency of certain operational risk events within banks have exhibited over-dispersion. Many times the bank only tracks events that result in a loss above a certain dollar threshold, say $100,000. So, most days there are no events, but then you get days when lots of events happen on the same day. 
 
 **12M1.**
 
