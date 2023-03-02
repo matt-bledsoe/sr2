@@ -1,0 +1,272 @@
+---
+title: Solutions for Statistical Rethinking 2023 Homework Week 06
+output: html_document
+--- 
+[Link to problem sheet](https://github.com/rmcelreath/stat_rethinking_2023/blob/main/homework/week06.pdf) 
+
+```{r setup, echo=FALSE, message=FALSE}
+library(rethinking)
+library(tidyverse)
+library(dagitty)
+```
+
+> 1. Conduct a prior predictive simulation for the ReedFrog model. By this I mean simulate the prior distribution of tank survival probabilities $\alpha_j$. Start by using this prior:
+
+$$\begin{align}
+\alpha_j &\sim \text{Normal}(\bar\alpha, \sigma)\\
+\bar\alpha &\sim \text{Normal}(0, 1)\\
+\sigma &\sim \text{Exponential}(1)
+\end{align}$$
+>
+> Be sure to transform the $\alpha_j$ values to the probability scale for plotting and summary. How does increasing the width of the prior on $\sigma$ change the prior distribution for $\alpha_j$? You might try Exponential(10) and Exponential(0.1) for example.
+
+```{r}
+# Number of samples
+n <- 100
+# Priors for alpha_bar and sigma
+alpha_bar <- rnorm(n, 0, 1)
+sigma <- rexp(n, 1)
+# Each sample of alpha_bar and sigma generates a _distribution_
+alpha <- map2(.x = alpha_bar, .y = sigma, .f = \(x, y) rnorm(1e4, x, y)) |>
+  `names<-`(paste0("sample", 1:n)) |>
+  as_tibble(..name_repair = "unique") |>
+  pivot_longer(cols = everything(), names_to = "sample") |>
+  mutate(p = logistic(value))
+
+p <- alpha |>
+  ggplot(aes(x = p)) +
+  geom_histogram(aes(y = after_stat(count / sum(count)), fill = sample),
+    alpha = 0.5
+  ) +
+  scale_y_continuous(labels = scales::percent) +
+  labs(
+    x = "Prior sample for alpha (probability)", y = "Proportion",
+    title = "sigma ~ Exponential(1)"
+  ) +
+  theme_classic() +
+  theme(legend.position = "none")
+p
+```
+
+The distribution of $\alpha_j$ collects toward the middle of the probability interval and drops off gradually from there to the left and right. Now let's consider what happens when we change the scale parameter for prior on $\sigma$.
+
+```{r}
+sigma <- rexp(n, 10)
+# Each sample of alpha_bar and sigma generates a _distribution_
+alpha <- map2(.x = alpha_bar, .y = sigma, .f = \(x, y) rnorm(1e4, x, y)) |>
+  `names<-`(paste0("sample", 1:n)) |>
+  as_tibble(..name_repair = "unique") |>
+  pivot_longer(cols = everything(), names_to = "sample") |>
+  mutate(p = logistic(value))
+
+p10 <- alpha |>
+  ggplot(aes(x = p)) +
+  geom_histogram(aes(y = after_stat(count / sum(count)), fill = sample),
+    alpha = 0.5
+  ) +
+  scale_y_continuous(labels = scales::percent) +
+  labs(
+    x = "Prior sample for alpha (probability)", y = "Proportion",
+    title = "sigma ~ Exponential(10)"
+  ) +
+  theme_classic() +
+  theme(legend.position = "none")
+
+sigma <- rexp(n, 0.1)
+# Each sample of alpha_bar and sigma generates a _distribution_
+alpha <- map2(.x = alpha_bar, .y = sigma, .f = \(x, y) rnorm(1e4, x, y)) |>
+  `names<-`(paste0("sample", 1:n)) |>
+  as_tibble(..name_repair = "unique") |>
+  pivot_longer(cols = everything(), names_to = "sample") |>
+  mutate(p = logistic(value))
+
+p.1 <- alpha |>
+  ggplot(aes(x = p)) +
+  geom_histogram(aes(y = after_stat(count / sum(count)), fill = sample),
+    alpha = 0.5
+  ) +
+  scale_y_continuous(labels = scales::percent) +
+  labs(
+    x = "Prior sample for alpha (probability)", y = "Proportion",
+    title = "sigma ~ Exponential(0.1)"
+  ) +
+  theme_classic() +
+  theme(legend.position = "none")
+
+# Plot all three
+gridExtra::grid.arrange(p, p10, p.1, nrow = 1)
+```
+
+As the scale parameter decreases (so the width of the distribution widens), extreme values (close to 0 and 1) become more likely. When the parameter is 10 values near the extremes of the interval are relatively unlikely, but when the parameter is 0.1 all the probability is at the extremes. 
+
+> 2. Revisit the ReedFrog survival data, `data(reedfrog)`. Start with the varying effects model from the book and lecture. Then modify it to estimate the causal effects of the treatment variables `pred` and `size`, including how size might modify the effect of predation. An easy approach is to estimate an effect for each combination of `pred` and `size`. Justify your model with a DAG of this experiment.
+
+```{r}
+data(reedfrogs)
+d <- reedfrogs |>
+  mutate(
+    tank = row_number(),
+    pred_i = as.integer(pred),
+    size_i = as.integer(size)
+  )
+dat <- list(
+  s = d$surv,
+  n = d$density,
+  tank = d$tank,
+  pred = d$pred_i,
+  size = d$size_i
+)
+
+# Repeat model m13.2 from the book
+m13_2 <- ulam(
+  alist(
+    s ~ dbinom(n, p),
+    logit(p) <- a[tank],
+    a[tank] ~ dnorm(a_bar, sigma),
+    a_bar ~ dnorm(0, 1.5),
+    sigma ~ dexp(1)
+  ),
+  data = dat
+)
+# Confirm that the estimates are similar to those from the model in the
+# book/lecture
+precis(m13_2, depth = 2)
+# Extract posterior samples
+post <- extract.samples(m13_2)
+
+m2 <- ulam(
+  alist(
+    s ~ dbinom(n, p),
+    logit(p) <- a[tank] + b[size, pred],
+    a[tank] ~ dnorm(a_bar, sigma),
+    matrix[size, pred]:b ~ normal(0, 1),
+    a_bar ~ dnorm(0, 1.5),
+    sigma ~ dexp(1)
+  ),
+  data = dat,
+  chains = 4
+)
+precis(m2, depth = 3)
+post2 <- extract.samples(m2)
+# Combine the samples for each tank for summary
+post2a <- lapply(
+  dat$tank,
+  function(tnk) {
+    # Get the size and pred indexes for the given tank
+    sz <- dat$size[dat$tank == tnk]
+    prd <- dat$pred[dat$tank == tnk]
+    # Sum the samples of the alpha for the tank and the beta for
+    # the combination of size and pred
+    return(post2$a[, tnk] + post2$b[, sz, prd])
+  }
+)
+
+# Add posterior survival probabilities from the two models to the data for
+# comparison
+m13_2_pi <- apply(post$a, 2, PI)
+m2_pi <- sapply(post2a, PI)
+d <- d |>
+  mutate(
+    prop_surv = surv / density,
+    post_surv = logistic(apply(post$a, 2, mean)),
+    post_surv_lower = logistic(m13_2_pi[1, ]),
+    post_surv_upper = logistic(m13_2_pi[2, ]),
+    post_surv2 = logistic(sapply(post2a, mean)),
+    post2_surv_lower = logistic(m2_pi[1, ]),
+    post2_surv_upper = logistic(m2_pi[2, ]),
+    class = paste(size, pred, sep = "_")
+  )
+
+d |>
+  ggplot(aes(x = tank, color = class)) +
+  geom_point(aes(y = prop_surv, shape = "Actual")) +
+  geom_point(aes(y = post_surv, shape = "Book Model")) +
+  geom_point(aes(y = post_surv2, shape = "Model 2")) +
+  scale_shape_manual(values = c(
+    "Actual" = "circle open",
+    "Book Model" = "circle small",
+    "Model 2" = "diamond"
+  )) +
+  theme_classic() +
+  labs(x = "Tank", y = "Proportion Survival", shape = "", color = "")
+```
+
+> 3. Now estimate the causal effect of `density` on survival. Consider whether `pred` modifies the effect of `density`. There are several good ways to include `density` in your binomial GLM. You could treat it as a continuous regression variable (possibly standardized). Or you could convert it to an ordered category (with three levels). Compare the $\sigma$ (tank standard deviation) posterior distribution to $\sigma$ from your model in Problem 2. How are they different? Why?
+
+```{r}
+dat$n_std <- standardize(dat$n)
+m3 <- ulam(
+  alist(
+    s ~ dbinom(n, p),
+    logit(p) <- a[tank] + b[size, pred] + c * n_std,
+    a[tank] ~ dnorm(a_bar, sigma),
+    matrix[size, pred]:b ~ normal(0, 1),
+    a_bar ~ dnorm(0, 1.5),
+    sigma ~ dexp(1),
+    c ~ normal(0, 1)
+  ),
+  data = dat,
+  chains = 4
+)
+precis(m3, depth = 3)
+post3 <- extract.samples(m3)
+
+# Compare posterior distributions of sigma
+post_sig <- tibble(
+  model2 = post2$sigma,
+  model3 = post3$sigma
+) |>
+  pivot_longer(everything(), names_to = "model", values_to = "post_sigma")
+
+post_sig |>
+  ggplot(aes(x = post_sigma, color = model)) +
+  geom_density()
+```
+
+The posterior distribution for $\sigma$ in the model that includes density is shifted slightly more to the left than the one from problem 2. 
+
+> 4. OPTIONAL CHALLENGE. Return to the Trolley data, `data(Trolley)`, from Chapter 12. Define and fit a varying intercepts model for these data. By this I mean to add an intercept parameter for the individual participants to the linear model. Cluster the varying intercepts on indivdual participants, as indicated by the uniqe values in the `id` variable. Include `action`, `intention`, and `contact` as treatment effects of interest. Compare the varying intercepts model and a model that ignores individuals. What is the impact of individual variation in these data?
+
+```{r}
+data(Trolley)
+d <- Trolley |>
+  # Create an index variable based on id
+  mutate(idx = as.integer(id))
+dat <- list(
+  response = d$response,
+  action = d$action,
+  intention = d$intention,
+  contact = d$contact,
+  idx = d$idx
+)
+m12_5 <- ulam(
+  alist(
+    response ~ dordlogit(phi, cutpoints),
+    phi <- ba * action + bc * contact + bi * intention,
+    bi <- bii + bia * action + bic * contact,
+    c(ba, bii, bc, bia, bic) ~ dnorm(0, 0.5),
+    cutpoints ~ dnorm(0, 1.5)
+  ),
+  data = dat
+)
+precis(m12_5, depth = 2)
+
+m3 <- ulam(
+  alist(
+    response ~ dordlogit(phi, cutpoints),
+    phi <- a[idx] + ba * action + bc * contact + bi * intention,
+    bi <- bii + bia * action + bic * contact,
+    c(ba, bii, bc, bia, bic) ~ dnorm(0, 0.5),
+    cutpoints ~ dnorm(0, 1.5),
+    a[idx] ~ dnorm(a_bar, sigma),
+    a_bar ~ normal(0, 1),
+    sigma ~ dexp(1)
+  ),
+  data = dat
+)
+precis(m3, depth = 2)
+coeftab(m12_5, m3, se = TRUE) |>
+  coeftab_plot(pars = c("bic", "bia", "bc", "bii", "ba"))
+```
+
+Comparing the coefficients on the treatment variables, adding the varying intercepts makes the effect of each variable more negative.
