@@ -17,7 +17,7 @@ $$\begin{align}
 \bar\alpha &\sim \text{Normal}(0, 1)\\
 \sigma &\sim \text{Exponential}(1)
 \end{align}$$
->
+
 > Be sure to transform the $\alpha_j$ values to the probability scale for plotting and summary. How does increasing the width of the prior on $\sigma$ change the prior distribution for $\alpha_j$? You might try Exponential(10) and Exponential(0.1) for example.
 
 ```{r}
@@ -137,14 +137,15 @@ post <- extract.samples(m13_2)
 m2 <- ulam(
   alist(
     s ~ dbinom(n, p),
-    logit(p) <- a[tank] + b[size, pred],
-    a[tank] ~ dnorm(a_bar, sigma),
-    matrix[size, pred]:b ~ normal(0, 1),
-    a_bar ~ dnorm(0, 1.5),
+    logit(p) <- a[tank] + b[pred, size],
+    a[tank] ~ normal(0, sigma),
+    matrix[pred, size]:b ~ normal(0, 1),
     sigma ~ dexp(1)
   ),
   data = dat,
-  chains = 4
+  chains = 4,
+  cores = 4,
+  log_lik = TRUE
 )
 precis(m2, depth = 3)
 post2 <- extract.samples(m2)
@@ -191,24 +192,43 @@ d |>
   labs(x = "Tank", y = "Proportion Survival", shape = "", color = "")
 ```
 
+The DAG for this model is:
+
+```{r}
+g <- dagitty('dag{
+  S [pos = "0, 0"]
+  P [pos = "-1, 0"]
+  T [pos = "-0.71, 0.71"]
+  D [pos = "0.71, 0.71"]
+  G [pos = "1, 0"]
+  P -> S
+  T -> S
+  D -> S
+  G -> S
+}')
+
+plot(g)
+```
+
 > 3. Now estimate the causal effect of `density` on survival. Consider whether `pred` modifies the effect of `density`. There are several good ways to include `density` in your binomial GLM. You could treat it as a continuous regression variable (possibly standardized). Or you could convert it to an ordered category (with three levels). Compare the $\sigma$ (tank standard deviation) posterior distribution to $\sigma$ from your model in Problem 2. How are they different? Why?
 
 ```{r}
-dat$n_std <- standardize(dat$n)
+dat$log_n <- standardize(log(dat$n))
 m3 <- ulam(
   alist(
     s ~ dbinom(n, p),
-    logit(p) <- a[tank] + b[size, pred] + c * n_std,
-    a[tank] ~ dnorm(a_bar, sigma),
-    matrix[size, pred]:b ~ normal(0, 1),
-    a_bar ~ dnorm(0, 1.5),
-    sigma ~ dexp(1),
-    c ~ normal(0, 1)
+    logit(p) <- a[tank] + b[pred, size] + c[pred] * log_n,
+    a[tank] ~ dnorm(0, sigma),
+    matrix[pred, size]:b ~ normal(0, 1),
+    c[pred] ~ normal(0, 0.5),
+    sigma ~ dexp(1)
   ),
   data = dat,
-  chains = 4
+  chains = 4,
+  cores = 4,
+  log_lik = TRUE
 )
-precis(m3, depth = 3)
+precis(m3, depth = 3, pars = c("b", "c", "sigma"))
 post3 <- extract.samples(m3)
 
 # Compare posterior distributions of sigma
@@ -223,7 +243,7 @@ post_sig |>
   geom_density()
 ```
 
-The posterior distribution for $\sigma$ in the model that includes density is shifted slightly more to the left than the one from problem 2. 
+The posterior distribution for $\sigma$ in the model that includes density is shifted slightly more to the left than the one from problem 2. This is because density (`log_n`) has a real effect on survival, so the uncertainty is reduced when included. 
 
 > 4. OPTIONAL CHALLENGE. Return to the Trolley data, `data(Trolley)`, from Chapter 12. Define and fit a varying intercepts model for these data. By this I mean to add an intercept parameter for the individual participants to the linear model. Cluster the varying intercepts on indivdual participants, as indicated by the uniqe values in the `id` variable. Include `action`, `intention`, and `contact` as treatment effects of interest. Compare the varying intercepts model and a model that ignores individuals. What is the impact of individual variation in these data?
 
@@ -241,30 +261,38 @@ dat <- list(
 )
 m12_5 <- ulam(
   alist(
-    response ~ dordlogit(phi, cutpoints),
+    response ~ dordlogit(phi, alpha),
     phi <- ba * action + bc * contact + bi * intention,
-    bi <- bii + bia * action + bic * contact,
-    c(ba, bii, bc, bia, bic) ~ dnorm(0, 0.5),
-    cutpoints ~ dnorm(0, 1.5)
+    c(ba, bi, bc) ~ dnorm(0, 0.5),
+    alpha ~ normal(0, 1)
   ),
-  data = dat
+  data = dat,
+  chains = 4,
+  cores = 4,
+  log_lik = TRUE
 )
-precis(m12_5, depth = 2)
+precis(m12_5)
+```
+So much for the model from the book. Now let's add individual intercepts.
 
+```{r}
 m3 <- ulam(
   alist(
-    response ~ dordlogit(phi, cutpoints),
+    response ~ dordlogit(phi, alpha),
     phi <- a[idx] + ba * action + bc * contact + bi * intention,
-    bi <- bii + bia * action + bic * contact,
-    c(ba, bii, bc, bia, bic) ~ dnorm(0, 0.5),
-    cutpoints ~ dnorm(0, 1.5),
-    a[idx] ~ dnorm(a_bar, sigma),
-    a_bar ~ normal(0, 1),
-    sigma ~ dexp(1)
+    transpars> vector[331]:a <<- abar + z * tau,
+    c(ba, bi, bc) ~ dnorm(0, 0.5),
+    alpha ~ normal(0, 1),
+    z[idx] ~ normal(0, 1),
+    abar ~ normal(0, 1),
+    tau ~ exponential(1)
   ),
-  data = dat
+  data = dat,
+  chains = 4,
+  cores = 4,
+  iter = 100
 )
-precis(m3, depth = 2)
+precis(m3)
 coeftab(m12_5, m3, se = TRUE) |>
   coeftab_plot(pars = c("bic", "bia", "bc", "bii", "ba"))
 ```
