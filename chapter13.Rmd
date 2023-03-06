@@ -1,0 +1,264 @@
+---
+title: Chapter 13 Problems and Notes
+output: html_document
+---
+
+```{r setup, message = FALSE, warning = FALSE}
+library(tidyverse)
+library(rethinking)
+
+knitr::opts_chunk$set(message = FALSE, warning = FALSE)
+```
+
+# Practice
+
+**13E1.**
+
+The $\alpha_{TANK}\sim\text{Normal}(0,1)$ will produce more shrinkage than the prior with a standard deviation of 2. The smaller standard deviation is more skeptical of outlying values, so will be less likely to overfit them.
+
+**13E2.**
+
+$$\begin{align}
+y_i &\sim \text{Binomial}(1, p_i) \\
+\text{logit}(p_i) &= \alpha_{GROUP[i]} + \beta x_i\\
+\alpha_{GROUP} &\sim \text{Normal}(\bar\alpha, \sigma) \\
+\beta &\sim \text{Normal}(0, 0.5) \\
+\bar\alpha &\sim \text{Normal}(0, 0.5) \\
+\sigma &\sim \text{Exponential}(1)
+\end{align}$$
+
+**13E3.**
+
+$$\begin{align}
+y_i &\sim \text{Normal}(\mu_i, \sigma) \\
+\mu_i &= \alpha_{GROUP[i]} + \beta x_i\\
+\alpha_{GROUP} &\sim \text{Normal}(\bar\alpha, \tau) \\
+\beta &\sim \text{Normal}(0, 0.5) \\
+\bar\alpha &\sim \text{Normal}(0, 0.5) \\
+\tau &\sim \text{Exponential}(1) \\
+\sigma &\sim \text{Exponential}(1)
+\end{align}$$
+
+**13E4.**
+
+$$\begin{align}
+y_i &\sim \text{Poisson}(\lambda) \\
+\log(\lambda) &= \alpha_j \\
+\alpha_j &\sim \text{Normal}(\bar\alpha, \sigma) \\
+\bar\alpha &\sim \text{Normal}(0, 1) \\
+\sigma &\sim \text{Exponential}(1)
+\end{align}$$
+
+**13E5.**
+
+$$\begin{align}
+y_i &\sim \text{Poisson}(\lambda) \\
+\log(\lambda) &= \alpha_j + \beta_j \\
+\alpha_j &\sim \text{Normal}(\bar\alpha, \sigma) \\
+\beta_j &\sim \text{Normal}(0, \tau) \\
+\bar\alpha &\sim \text{Normal}(0, 1) \\
+\sigma &\sim \text{Exponential}(1) \\
+\tau &\sim \text{Exponential}(1)
+\end{align}$$
+
+**13M1.**
+
+Load the data. Fit the model from the chapter to confirm everything is working.
+```{r}
+data(reedfrogs)
+d <- reedfrogs |>
+  mutate(tank = row_number(),
+         pr = as.integer(pred),
+         sz = as.integer(size))
+dat <- list(
+  s = d$surv,
+  n = d$density,
+  tank = d$tank,
+  pr = d$pred,
+  sz = d$size
+)
+m13_2 <- ulam(
+  alist(
+    s ~ dbinom(n, p),
+    logit(p) <- a[tank],
+    a[tank] ~ dnorm(a_bar, sigma),
+    a_bar ~ dnorm(0, 1.5),
+    sigma ~ dexp(1)
+  ),
+  data = dat,
+  chains = 4,
+  cores = 4,
+  log_lik = TRUE
+)
+precis(m13_2)
+```
+
+Now add `predation` and `size` in various configurations.
+```{r}
+# Model adding predation only
+m_p <- ulam(
+  alist(
+    s ~ dbinom(n, p),
+    logit(p) <- a[tank] + bp[pr],
+    a[tank] ~ dnorm(a_bar, sigma),
+    bp[pr] ~ dnorm(0, 1),
+    a_bar ~ dnorm(0, 1.5),
+    sigma ~ dexp(1)
+  ),
+  data = dat,
+  chains = 4,
+  cores =4,
+  log_lik = TRUE
+)
+precis(m_p, depth = 2, pars = c("bp", "a_bar", "sigma"))
+# Model adding size only
+m_s <- ulam(
+  alist(
+    s ~ dbinom(n, p),
+    logit(p) <- a[tank] + bs[sz],
+    a[tank] ~ dnorm(a_bar, sigma),
+    bs[pr] ~ dnorm(0, 1),
+    a_bar ~ dnorm(0, 1.5),
+    sigma ~ dexp(1)
+  ),
+  data = dat,
+  chains = 4,
+  cores =4,
+  log_lik = TRUE
+)
+precis(m_s, depth = 2, pars = c("bs", "a_bar", "sigma"))
+# Model with interaction of predation and size
+m_sp <- ulam(
+  alist(
+    s ~ dbinom(n, p),
+    logit(p) <- a[tank] + b[pr, sz],
+    a[tank] ~ dnorm(a_bar, sigma),
+    matrix[pr, sz]:b ~ normal(0, 1),
+    a_bar ~ dnorm(0, 1.5),
+    sigma ~ dexp(1)
+  ),
+  data = dat,
+  chains = 4,
+  cores =4,
+  log_lik = TRUE
+)
+precis(m_sp, depth = 3, pars = c("b", "a_bar", "sigma"))
+```
+
+The mean values of $\sigma$ vary across the four models. It is the smallest in the model with the interaction of `size` and `pred`, slightly larger in the model with only `pred`, and then almost double the size in the model without any effects or just `size`. The reason is that predation has a large effect on survival. In models that don't include it, the population-level variance has to include it.
+
+```{r}
+coeftab_plot(coeftab(m13_2, m_p, m_s, m_sp), pars = "sigma")
+```
+
+**13M2.**
+
+```{r}
+compare(m13_2, m_p, m_s, m_sp)
+```
+
+**13M3.**
+
+```{r}
+m13m3 <- ulam(
+  alist(
+    s ~ dbinom(n, p),
+    logit(p) <- a[tank],
+    a[tank] ~ dcauchy(a_bar, sigma),
+    a_bar ~ dnorm(0, 1.5),
+    sigma ~ dexp(1)
+  ),
+  data = dat,
+  chains = 4,
+  cores = 4,
+  log_lik = TRUE
+)
+
+precis(m13m3, depth = 2)
+```
+
+Now we compare to model `m13_2` which was fit in problem 13M1.
+```{r}
+# Can't get coeftab to work with the a parameters, so need to compare manually
+coef_table <- tibble(
+  "par" = precis(m13_2, depth = 2)@row.names,
+  "m13_2" = precis(m13_2, depth = 2)@.Data[[1]]
+) |>
+left_join(
+  tibble(
+  "par" = precis(m13m3, depth = 2)@row.names,
+  "m13m3" = precis(m13m3, depth = 2)@.Data[[1]]
+  ),
+  by = "par"
+) |>
+mutate(tank = as.integer(str_extract(par, "[0-9]{1,2}")),
+       # Convert a parameters to probability scale
+       m13_2 = if_else(str_detect(par, "^a"), inv_logit(m13_2), m13_2),
+       m13m3 = if_else(str_detect(par, "^a"), inv_logit(m13m3), m13m3)) |>
+left_join(d[, c("tank", "propsurv")], by = "tank") |>
+rename(actual = propsurv) |>
+# Calculate overall weighted average survival of the sample
+mutate(actual = if_else(par == "a_bar", sum(d$surv) / sum(d$density), actual))
+
+overall_means <- coef_table |>
+  select(-tank) |>
+  filter(par == "a_bar") |>
+  pivot_longer(-par, names_to = "model", values_to = "post_mean")
+
+coef_table |>
+  filter(str_detect(par, "a\\[")) |>
+  pivot_longer(-c("par", "tank"),
+               names_to = "model",
+               values_to = "post_mean") |>
+ggplot(aes(x = reorder(tank, -tank), y = post_mean, color = model)) +
+geom_point() +
+geom_hline(data = overall_means, 
+           aes(yintercept = post_mean, color = model), linetype = 2) +
+coord_flip() +
+labs(x = "Tank", y = "Proportion Survival", color = "") +
+theme_classic()
+```
+
+**13M4.**
+
+```{r}
+m13m4 <- ulam(
+  alist(
+    s ~ dbinom(n, p),
+    logit(p) <- a[tank],
+    a[tank] ~ dstudent(2, a_bar, sigma),
+    a_bar ~ dnorm(0, 1.5),
+    sigma ~ dexp(1)
+  ),
+  data = dat,
+  chains = 4,
+  cores = 4,
+  log_lik = TRUE
+)
+
+# Add this model to the coef_table from the last problem.
+coef_table <- coef_table |>
+  left_join(tibble(
+    "par" = precis(m13m4, depth = 2)@row.names,
+    "m13m4" = precis(m13m4, depth = 2)@.Data[[1]]
+  ), by = "par") |>
+  mutate(m13m4 = if_else(str_detect(par, "^a"), inv_logit(m13m4), m13m4))
+
+overall_means <- coef_table |>
+  select(-tank) |>
+  filter(par == "a_bar") |>
+  pivot_longer(-par, names_to = "model", values_to = "post_mean")
+
+coef_table |>
+  filter(str_detect(par, "a\\[")) |>
+  pivot_longer(-c("par", "tank"),
+               names_to = "model",
+               values_to = "post_mean") |>
+ggplot(aes(x = reorder(tank, -tank), y = post_mean, color = model)) +
+geom_point() +
+geom_hline(data = overall_means, 
+           aes(yintercept = post_mean, color = model), linetype = 2) +
+coord_flip() +
+labs(x = "Tank", y = "Proportion Survival", color = "") +
+theme_classic()
+```
