@@ -1,0 +1,154 @@
+---
+title: Solutions for Statistical Rethinking 2023 Homework Week 07
+output: html_document
+--- 
+[Link to problem sheet](https://github.com/rmcelreath/stat_rethinking_2023/blob/main/homework/week07.pdf) 
+
+```{r setup, echo=FALSE, message=FALSE}
+library(rethinking)
+library(tidyverse)
+library(dagitty)
+```
+
+> 1. The data in `data(bangladesh)` are 1934 women from the 1989 Bangladesh Fertility Survey. For each woman, we know which `district` she lives in, her number of `living.children`, her `age.centered`, whether she lives in an `urban` center, and finally whether or not she used contraception (`use.contraception`).
+>
+> In the lecture, we estimated the total effect of urban residence on contraceptive use. Using the DAG from the lecture, or your own version if you prefer, now estimate only the direct effect of urban residence on contraceptive use.
+
+Let's draw the DAG from the lecture for reference:
+```{r}
+g <- dagitty('dag{
+  C [pos="0,0"]
+  A [pos="-0.5,0.5"]
+  K [pos="-0.25,1"]
+  U [pos="0.25,1"]
+  D [pos="0.5,0.5"]
+  A -> C K -> C U -> C D -> C
+  A -> K U -> K D -> U
+}')
+plot(g)
+```
+
+Load the data and build the model from the lecture.
+
+```{r}
+data(bangladesh)
+d <- bangladesh
+dat <- list(
+  d = d$district,
+  c = d$use.contraception,
+  u = d$urban,
+  age = d$age.centered,
+  k = d$living.children
+)
+
+m0 <- ulam(
+  alist(
+    c ~ bernoulli(p),
+    logit(p) <- a[d] + b[d] * u,
+    
+    transpars> vector[61]:a <<- abar[1] + v[, 1],
+    transpars> vector[61]:b <<- abar[2] + v[, 2],
+    transpars> matrix[61, 2]:v <- compose_noncentered(sigma, l_rho, z),
+    
+    matrix[2, 61]:z ~ normal(0, 1),
+    vector[2]:abar ~ normal(0, 1),
+    cholesky_factor_corr[2]:l_rho ~ lkj_corr_cholesky(4),
+    vector[2]:sigma ~ exponential(1),
+    
+    gq> matrix[2, 2]:rho <<- Chol_to_Corr(l_rho)
+  ),
+  data = dat,
+  cores = 4,
+  chains = 4
+)
+precis(m0, depth = 2)
+
+d |>
+  group_by(district, urban) |>
+  summarize(prop_contr = mean(use.contraception)) |>
+  ungroup() |>
+  left_join(
+    tibble(district = rep(1:61, 2),
+           urban = rep(0:1, each = 61),
+           post_mean = inv_logit(
+            c(m0@coef[paste0("a[", 1:61, "]")],
+              m0@coef[paste0("a[", 1:61, "]")] +
+                m0@coef[paste0("b[", 1:61, "]")]))),
+    by = c("district", "urban")
+  ) |>
+  pivot_longer(-c("district", "urban"), names_to = "src") |>
+  ggplot(aes(x = district, y = value, color = src)) +
+  geom_point(shape = 1) +
+  scale_color_manual(values = c("prop_contr" = "black", "post_mean" = "red"),
+                     labels = c("prop_contr" = "Observed",
+                                "post_mean" = "Posterior Mean")) +
+  scale_x_continuous(breaks = seq(0, 60, by = 10)) +
+  labs(x = "District", y = "Proportion Using Contraception", color = "") +
+  facet_grid(rows = "urban") +
+  theme_classic()
+```
+
+In order to estimate the direct effect of $U$ on $C$, we need to condition on $K$ to block that path of indirect influence. But, doing this opens up the backdoor path from $U\rightarrow K\leftarrow A\rightarrow C$, so we have to condition on $A$ as well. We can treat $A$ as a continuous variable and it came to us centered already, but what to do about the number of children? We will treat it as a continuous variable even though we know there are only so many values it can take (1--4 in the sample).
+
+```{r}
+m1 <- ulam(
+  alist(
+    c ~ bernoulli(p),
+    logit(p) <- a[d] + b[d] * u + bk * k + ba * age,
+    
+    transpars> vector[61]:a <<- abar[1] + v[, 1],
+    transpars> vector[61]:b <<- abar[2] + v[, 2],
+    transpars> matrix[61, 2]:v <- compose_noncentered(sigma, l_rho, z),
+    
+    matrix[2, 61]:z ~ normal(0, 1),
+    vector[2]:abar ~ normal(0, 1),
+    cholesky_factor_corr[2]:l_rho ~ lkj_corr_cholesky(4),
+    vector[2]:sigma ~ exponential(1),
+    c(bk, ba) ~ normal(0, 0.5),
+    
+    gq> matrix[2, 2]:rho <<- Chol_to_Corr(l_rho)
+  ),
+  data = dat,
+  cores = 4,
+  chains = 4
+)
+precis(m1, depth = 2)
+
+```
+
+The average direct effect of $U$ is `r m1@coef["abar[2]"]`, which is not that much changed from the value from the original model `r m0@coef["abar[2]"]`.
+
+> 2. Using the same DAG as before, now estimate the effect of number of surviving children on contraceptive use. Obviously contraceptive use can also influence the number of surviving children. But leave that issue aside for the moment (it will return in the optional challenge further down).
+
+The same model as in #1 will work for this question. There are two backdoor paths from $K$ to $C$ one through $A$ and one through $U$. The effect of having $x$ number of children is `r inv_logit(m1@coef["bk"] * 1:4)`.
+
+> 3. Now let the causal effect of children vary by district. Incorporate this new district feature into the same multivariate prior that contains the urban/rural features. How much do districts vary in how surviving children are associated with contraceptive use?
+
+```{r}
+m3 <- ulam(
+  alist(
+    c ~ bernoulli(p),
+    logit(p) <- a[d] + b[d] * u + bk[d] * k + ba * age,
+    
+    transpars> vector[61]:a <<- abar[1] + v[, 1],
+    transpars> vector[61]:b <<- abar[2] + v[, 2],
+    transpars> vector[61]:bk <<- abar[3] + v[, 3],
+    transpars> matrix[61, 3]:v <- compose_noncentered(sigma, l_rho, z),
+    
+    matrix[3, 61]:z ~ normal(0, 1),
+    vector[3]:abar ~ normal(0, 1),
+    cholesky_factor_corr[3]:l_rho ~ lkj_corr_cholesky(4),
+    vector[3]:sigma ~ exponential(1),
+    ba ~ normal(0, 0.5),
+    
+    gq> matrix[3, 3]:rho <<- Chol_to_Corr(l_rho)
+  ),
+  data = dat,
+  cores = 4,
+  chains = 4
+)
+precis(m3, depth = 2)
+
+```
+
+The average effect is `abar[3]` = `r m3@coef["abar[3]"]`, which isn't much changed from the last model (`bk` = `r m1@coef["bk"]`). So there must not be much variation across districts due to the number of children.
